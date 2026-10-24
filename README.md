@@ -1,3 +1,57 @@
+# Enhanced Just Player
+
+A fork of [Just (Video) Player](https://github.com/moneytoo/Player) by [moneytoo](https://github.com/moneytoo), tuned for Android TV boxes such as the NVIDIA SHIELD. It plays the best audio track by itself and has a tvOS-style remote-friendly interface. Everything else is Just Player.
+
+<img src="docs/tv/1-controls.jpg" width="806">
+
+<img src="docs/tv/2-audio.jpg" width="400"> <img src="docs/tv/3-info.jpg" width="400">
+
+## What's different
+
+**The best audio track, automatically.** Players normally start the track the file marks as default, which is often a stereo or audio description track. Enhanced Just Player picks, among the tracks in your language:
+
+1. object audio first: Dolby Atmos (TrueHD or DD+) and DTS:X,
+2. then lossless: TrueHD, DTS-HD MA, FLAC, PCM,
+3. then the most channels.
+
+Commentary and audio description tracks are never picked on their own. A track you choose yourself always wins.
+
+**A TV interface in the style of tvOS.**
+
+- One line at the bottom: the title, format badges (4K, Dolby Vision, Dolby Atmos) and a warning only when a better audio track exists. Subtitles, Audio and More sit on the right.
+- A thin timeline with the elapsed time under the playhead and the time remaining at the end. OK plays and pauses, Left and Right seek.
+- Menus open above their button. Audio lists every track with its codec, marks the best one and ticks the one playing; More holds Info (video, audio and subtitle details, including passthrough and the display refresh rate), aspect ratio, picture-in-picture, open file and settings.
+- Back steps out one level at a time. The controls stay up while a menu is open, and subtitles move above the controls while they are shown.
+
+It installs next to Just Player as its own app (`io.github.royalgit.enhancedjustplayer`).
+
+## Using it with Stremio
+
+In Stremio, set Settings → Playback → Default player to **External**, then choose **Enhanced Just Player** and **Always** when Android asks. Stremio keeps your watch progress: the player hands the position back when you exit. In the player, turn on More → Player settings → **Auto frame rate matching** so 24p films play at 24 Hz.
+
+## Building
+
+JDK 17 or newer and the Android SDK (Gradle downloads the platform it needs):
+
+```bash
+./gradlew assembleLatestUniversalRelease -PabiFilter=arm64-v8a
+apksigner sign --ks <your keystore> --out enhanced-just-player.apk \
+    app/build/outputs/apk/latestUniversal/release/Just.Player.v*.apk
+adb install enhanced-just-player.apk
+```
+
+Leave out `-PabiFilter` for a universal APK.
+
+## Credits and licences
+
+- [Just Player](https://github.com/moneytoo/Player) is released into the public domain ([Unlicense](LICENSE)); the changes in this fork are too.
+- [Outfit](https://fonts.google.com/specimen/Outfit) font: SIL Open Font License 1.1, see [FONT-LICENSE-OFL.txt](FONT-LICENSE-OFL.txt).
+- Icons: [Material Symbols Rounded](https://github.com/google/material-design-icons), Apache License 2.0.
+
+---
+
+The original Just Player README follows.
+
 # Just (Video) Player 
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/moneytoo/Player.svg?logo=github&label=GitHub&cacheSeconds=3600)](https://github.com/moneytoo/Player/releases/latest)

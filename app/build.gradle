@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         def abiFilter = project.findProperty("abiFilter")
-        applicationId "com.brouken.player.autopick"
+        applicationId "io.github.royalgit.enhancedjustplayer"
         minSdkVersion 24
         targetSdkVersion 36
         versionCode 219

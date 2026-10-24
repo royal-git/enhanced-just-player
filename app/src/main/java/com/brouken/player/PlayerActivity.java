@@ -723,11 +723,13 @@ public class PlayerActivity extends Activity {
                     // Because when using dpad controls, focus resets to first item in bottom controls bar
                     timeBar.requestFocus();
                     updateSummary();
+                    playerView.post(() -> liftSubtitles(controllerVisible));
                     controlGroup.setTranslationY(0f);
                     controlGroup.setAlpha(0f);
                     controlGroup.animate().alpha(1f).setDuration(180).start();
                 } else {
                     closePopover(false);
+                    liftSubtitles(false);
                 }
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
@@ -1976,6 +1978,25 @@ public class PlayerActivity extends Activity {
         popover.setVisibility(View.GONE);
         popoverInfo.setVisibility(View.GONE);
         holdControls(false);
+    }
+
+    // While the controls are up, subtitles sit just above the title row instead of under the timeline
+    private void liftSubtitles(boolean lift) {
+        final SubtitleView subtitleView = playerView.getSubtitleView();
+        if (subtitleView == null) {
+            return;
+        }
+        float fraction = SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f;
+        final View titleRow = playerView.findViewById(R.id.title_row);
+        if (lift && titleRow != null && subtitleView.getHeight() > 0) {
+            final int[] rowLocation = new int[2];
+            final int[] subtitleLocation = new int[2];
+            titleRow.getLocationInWindow(rowLocation);
+            subtitleView.getLocationInWindow(subtitleLocation);
+            final int fromBottom = subtitleLocation[1] + subtitleView.getHeight() - rowLocation[1] + Utils.dpToPx(12);
+            fraction = Math.max(fraction, fromBottom / (float) subtitleView.getHeight());
+        }
+        subtitleView.setBottomPaddingFraction(fraction);
     }
 
     // Keep the controls up while a menu or the Info sheet is open; closing them restarts the usual timeout
