@@ -194,6 +194,13 @@ public class PlayerActivity extends Activity {
     private TrackMemory trackMemory;
     @Nullable private String memoryShowId;
     private boolean trackMemoryApplied;
+    // Chapters of the current file, in order, hidden ones left out
+    private final List<androidx.media3.extractor.metadata.Chapter> chapters = new ArrayList<>();
+    // The More menu is showing a list of its own (Chapters), so Back returns to More
+    private boolean moreSubmenu;
+    // Rows are being replaced: focus briefly leaves the menu, which must not close it
+    private boolean rebindingMenu;
+    private int shownChapter = -1;
     @Nullable private Cinemeta.Meta mediaMeta;
     @Nullable private Bitmap mediaPoster;
     private static final ExecutorService background = Executors.newSingleThreadExecutor();
@@ -544,7 +551,7 @@ public class PlayerActivity extends Activity {
         iconAudio.setOnClickListener(view -> openPopover(view));
         iconMore.setOnClickListener(view -> openPopover(view));
         playerView.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
-            if (popover.getVisibility() == View.VISIBLE && (newFocus == null || !isDescendant(popover, newFocus))) {
+            if (!rebindingMenu && popover.getVisibility() == View.VISIBLE && (newFocus == null || !isDescendant(popover, newFocus))) {
                 closePopover(false);
             }
         });
@@ -740,6 +747,10 @@ public class PlayerActivity extends Activity {
             lastPositionMs = position;
             lastDurationMs = duration;
             updateTimeRemaining();
+            // An open chapter list follows playback into the next chapter
+            if (moreSubmenu && currentChapterIndex() != shownChapter) {
+                bindMenu(buildChapterItems());
+            }
         });
         // The elapsed time rides under the playhead, stopping short of the remaining time
         timeBar.setPlayheadListener(x -> {
@@ -1637,6 +1648,7 @@ public class PlayerActivity extends Activity {
         @Override
         public void onTracksChanged(Tracks tracks) {
             applyTrackMemory(tracks);
+            updateChapters(tracks);
             refreshPanels();
         }
 
@@ -2231,16 +2243,20 @@ public class PlayerActivity extends Activity {
     private void openPopover(View anchor) {
         // Back from a More detail page: refill the list and move focus into it before the details hide
         if (popover.getVisibility() == View.VISIBLE && isDetailShown() && anchor == iconMore && popoverAnchor == iconMore) {
+            moreSubmenu = false;
             popoverHeader.setText("MORE");
+            rebindingMenu = true;
             final View target = popoverList.getChildAt(bindMenu(buildMenuItems(anchor)));
             popoverList.setVisibility(View.VISIBLE);
             if (target != null) {
                 target.requestFocus();
             }
+            rebindingMenu = false;
             popoverInfo.setVisibility(View.GONE);
             popoverAbout.setVisibility(View.GONE);
             return;
         }
+        moreSubmenu = false;
         popoverInfo.setVisibility(View.GONE);
         popoverAbout.setVisibility(View.GONE);
         popoverList.setVisibility(View.VISIBLE);
@@ -2291,7 +2307,82 @@ public class PlayerActivity extends Activity {
     }
 
     private boolean isDetailShown() {
-        return popoverInfo.getVisibility() == View.VISIBLE || popoverAbout.getVisibility() == View.VISIBLE;
+        return moreSubmenu || popoverInfo.getVisibility() == View.VISIBLE || popoverAbout.getVisibility() == View.VISIBLE;
+    }
+
+    // More > Chapters: the chapter list in place of the More list
+    private void showChapters() {
+        moreSubmenu = true;
+        popoverHeader.setText("CHAPTERS");
+        rebindingMenu = true;
+        final View target = popoverList.getChildAt(bindMenu(buildChapterItems()));
+        if (target != null) {
+            target.requestFocus();
+        }
+        rebindingMenu = false;
+    }
+
+    private List<MenuItem> buildChapterItems() {
+        final List<MenuItem> items = new ArrayList<>();
+        final int current = currentChapterIndex();
+        shownChapter = current;
+        for (int i = 0; i < chapters.size(); i++) {
+            final androidx.media3.extractor.metadata.Chapter chapter = chapters.get(i);
+            final long start = chapter.getStartTimeMs();
+            items.add(new MenuItem(chapterTitle(chapter, i), Utils.formatMilis(start), i == current, false, () -> {
+                if (player != null) {
+                    player.seekTo(start);
+                }
+            }));
+        }
+        return items;
+    }
+
+    private static String chapterTitle(androidx.media3.extractor.metadata.Chapter chapter, int index) {
+        final androidx.media3.common.Label title = chapter.getTitle();
+        return title != null && title.value != null && !title.value.trim().isEmpty() ? title.value.trim() : "Chapter " + (index + 1);
+    }
+
+    private int currentChapterIndex() {
+        if (player == null) {
+            return -1;
+        }
+        final long position = player.getCurrentPosition();
+        int current = -1;
+        for (int i = 0; i < chapters.size(); i++) {
+            if (chapters.get(i).getStartTimeMs() <= position) {
+                current = i;
+            }
+        }
+        return current;
+    }
+
+    // Matroska chapters arrive as metadata on the tracks' formats (Media3 1.11+); the same list is repeated per track
+    private void updateChapters(Tracks tracks) {
+        final java.util.TreeMap<Long, androidx.media3.extractor.metadata.Chapter> byStart = new java.util.TreeMap<>();
+        for (Tracks.Group group : tracks.getGroups()) {
+            for (int i = 0; i < group.length; i++) {
+                final androidx.media3.common.Metadata metadata = group.getTrackFormat(i).metadata;
+                if (metadata == null) {
+                    continue;
+                }
+                for (int e = 0; e < metadata.length(); e++) {
+                    if (metadata.get(e) instanceof androidx.media3.extractor.metadata.Chapter) {
+                        final androidx.media3.extractor.metadata.Chapter chapter = (androidx.media3.extractor.metadata.Chapter) metadata.get(e);
+                        if (!chapter.isHidden()) {
+                            byStart.put(chapter.getStartTimeMs(), chapter);
+                        }
+                    }
+                }
+            }
+        }
+        chapters.clear();
+        chapters.addAll(byStart.values());
+        final long[] starts = new long[chapters.size()];
+        for (int i = 0; i < starts.length; i++) {
+            starts[i] = chapters.get(i).getStartTimeMs();
+        }
+        timeBar.setChapterStarts(chapters.size() > 1 ? starts : new long[0]);
     }
 
     private void closePopover(boolean restoreFocus) {
@@ -2311,6 +2402,7 @@ public class PlayerActivity extends Activity {
         popover.setVisibility(View.GONE);
         popoverInfo.setVisibility(View.GONE);
         popoverAbout.setVisibility(View.GONE);
+        moreSubmenu = false;
         holdControls(false);
     }
 
@@ -2346,6 +2438,11 @@ public class PlayerActivity extends Activity {
         final List<MenuItem> items = new ArrayList<>();
         if (anchor == iconMore) {
             items.add(new MenuItem("Info", "video, audio, subtitles", false, false, this::showPopoverInfo, true));
+            if (chapters.size() > 1) {
+                final int current = currentChapterIndex();
+                items.add(new MenuItem("Chapters", current >= 0 ? chapterTitle(chapters.get(current), current) : chapters.size() + " chapters",
+                        false, false, this::showChapters, true));
+            }
             items.add(new MenuItem("Aspect ratio", playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "Zoom" : "Fit",
                     false, false, () -> buttonAspectRatio.performClick()));
             if (Utils.isPiPSupported(this) && buttonPiP != null) {
@@ -2514,7 +2611,9 @@ public class PlayerActivity extends Activity {
         if (popover.getVisibility() != View.VISIBLE) {
             return;
         }
-        if (popoverInfo.getVisibility() == View.VISIBLE) {
+        if (moreSubmenu) {
+            bindMenu(buildChapterItems());
+        } else if (popoverInfo.getVisibility() == View.VISIBLE) {
             updatePopoverInfo();
         } else if (popoverAbout.getVisibility() == View.VISIBLE) {
             updatePopoverAbout();

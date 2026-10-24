@@ -36,6 +36,7 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
     private Rect progressBar;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private float lastPlayheadX = -1;
+    private long[] chapterStartsMs = new long[0];
 
     public CustomDefaultTimeBar(Context context) {
         this(context, null);
@@ -82,13 +83,23 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
         final float top = centerY - radius;
         final float bottom = centerY + radius;
 
-        paint.setColor(focused ? 0x66FFFFFF : 0x4DFFFFFF);
-        canvas.drawRoundRect(progressBar.left, top, progressBar.right, bottom, radius, radius, paint);
-
         final float playheadX = Math.max(progressBar.left, Math.min(scrubberBar.right, progressBar.right));
-        if (playheadX > progressBar.left) {
-            paint.setColor(focused ? 0xFFFFFFFF : 0xD9FFFFFF);
-            canvas.drawRoundRect(progressBar.left, top, playheadX, bottom, radius, radius, paint);
+
+        // One segment per chapter, with a small gap at each chapter start, as tvOS draws them
+        final float[] edges = segmentEdges();
+        final float gap = Utils.dpToPx(3);
+        for (int i = 0; i + 1 < edges.length; i++) {
+            final float start = edges[i] + (i == 0 ? 0 : gap / 2);
+            final float end = edges[i + 1] - (i + 2 == edges.length ? 0 : gap / 2);
+            if (end <= start) {
+                continue;
+            }
+            paint.setColor(focused ? 0x66FFFFFF : 0x4DFFFFFF);
+            canvas.drawRoundRect(start, top, end, bottom, radius, radius, paint);
+            if (playheadX > start) {
+                paint.setColor(focused ? 0xFFFFFFFF : 0xD9FFFFFF);
+                canvas.drawRoundRect(start, top, Math.min(playheadX, end), bottom, radius, radius, paint);
+            }
         }
 
         final float tickHalfWidth = Utils.dpToPx(1);
@@ -106,6 +117,30 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
     protected void onFocusChanged(boolean gainFocus, int direction, @Nullable Rect previouslyFocusedRect) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
         invalidate();
+    }
+
+    // Chapter starts in milliseconds; an empty array draws one plain track
+    public void setChapterStarts(long[] startsMs) {
+        chapterStartsMs = startsMs;
+        invalidate();
+    }
+
+    private float[] segmentEdges() {
+        final java.util.List<Float> edges = new java.util.ArrayList<>();
+        edges.add((float) progressBar.left);
+        if (duration > 0) {
+            for (long start : chapterStartsMs) {
+                if (start > 0 && start < duration) {
+                    edges.add(progressBar.left + progressBar.width() * (start / (float) duration));
+                }
+            }
+        }
+        edges.add((float) progressBar.right);
+        final float[] out = new float[edges.size()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = edges.get(i);
+        }
+        return out;
     }
 
     public void setPlayheadListener(PlayheadListener playheadListener) {
