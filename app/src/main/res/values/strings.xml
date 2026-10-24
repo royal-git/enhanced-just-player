@@ -62,4 +62,7 @@
     <string name="tv_subtitles" translatable="false">Subtitles</string>
     <string name="tv_audio" translatable="false">Audio</string>
     <string name="tv_more" translatable="false">More</string>
+    <string name="pref_skip_lookup" translatable="false">Skip intro and credits online</string>
+    <string name="pref_skip_lookup_on" translatable="false">When the file has no named chapters, look up timestamps on TheIntroDB (sends the IMDb id and episode)</string>
+    <string name="pref_skip_lookup_off" translatable="false">Only use chapters named Intro, Recap or Credits in the file</string>
 </resources>

@@ -25,6 +25,13 @@
             app:title="@string/pref_framerate_matching" />
 
         <SwitchPreferenceCompat
+            app:key="skipLookup"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_skip_lookup_on"
+            app:summaryOff="@string/pref_skip_lookup_off"
+            app:title="@string/pref_skip_lookup" />
+
+        <SwitchPreferenceCompat
             app:key="autoPiP"
             app:defaultValue="false"
             app:summaryOn="@string/pref_auto_pip_on"

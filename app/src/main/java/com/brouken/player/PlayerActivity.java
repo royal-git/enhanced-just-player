@@ -201,6 +201,24 @@ public class PlayerActivity extends Activity {
     // Rows are being replaced: focus briefly leaves the menu, which must not close it
     private boolean rebindingMenu;
     private int shownChapter = -1;
+    // Skip intro / recap / credits
+    private TextView skipButton;
+    private final List<SkipSegments.Segment> skipSegments = new ArrayList<>();
+    private boolean skipSegmentsLoaded;
+    @Nullable private SkipSegments.Segment skipShown;
+    private long skipShownAtMs;
+    @Nullable private SkipSegments.Segment skipDismissed;
+    private static final long SKIP_VISIBLE_MS = 15_000;
+    private static final long SKIP_TICK_MS = 500;
+    private final Runnable skipTicker = new Runnable() {
+        @Override
+        public void run() {
+            updateSkipButton();
+            if (player != null) {
+                playerView.postDelayed(this, SKIP_TICK_MS);
+            }
+        }
+    };
     @Nullable private Cinemeta.Meta mediaMeta;
     @Nullable private Bitmap mediaPoster;
     private static final ExecutorService background = Executors.newSingleThreadExecutor();
@@ -527,6 +545,19 @@ public class PlayerActivity extends Activity {
         popoverInfo = playerView.findViewById(R.id.popover_info);
         popoverAbout = playerView.findViewById(R.id.popover_about);
         trackMemory = new TrackMemory(this);
+
+        // The skip button sits in the overlay above the video, so it shows while the controls are hidden
+        skipButton = new TextView(this);
+        skipButton.setBackgroundResource(R.drawable.tv_skip_background);
+        skipButton.setTextColor(0xF2FFFFFF);
+        skipButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        skipButton.setTypeface(ResourcesCompat.getFont(this, R.font.outfit_semibold));
+        skipButton.setPadding(Utils.dpToPx(22), Utils.dpToPx(10), Utils.dpToPx(22), Utils.dpToPx(10));
+        skipButton.setVisibility(View.GONE);
+        final FrameLayout.LayoutParams skipLayoutParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM | android.view.Gravity.END);
+        skipLayoutParams.setMargins(0, 0, Utils.dpToPx(48), Utils.dpToPx(56));
+        playerView.getOverlayFrameLayout().addView(skipButton, skipLayoutParams);
         final View aboutPoster = popoverAbout.findViewById(R.id.about_poster);
         aboutPoster.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -795,6 +826,7 @@ public class PlayerActivity extends Activity {
                     closePopover(false);
                     liftSubtitles(false);
                 }
+                updateSkipButton();
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
                     if (errorToShow != null) {
@@ -974,6 +1006,10 @@ public class PlayerActivity extends Activity {
                 if (player == null)
                     break;
                 if (!controllerVisibleFully) {
+                    if (skipButton != null && skipButton.getVisibility() == View.VISIBLE) {
+                        performSkip();
+                        return true;
+                    }
                     if (player.isPlaying()) {
                         player.pause();
                     } else {
@@ -1095,6 +1131,17 @@ public class PlayerActivity extends Activity {
                 }
             }
             return true;
+        }
+
+        // Up from the top row (the icons) closes the controls, when no menu is open
+        if (controllerVisibleFully && event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP && popover != null && popover.getVisibility() != View.VISIBLE) {
+            final View focused = getCurrentFocus();
+            if (focused != null && focused.getParent() == iconRow) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                    playerView.hideController();
+                }
+                return true;
+            }
         }
 
         // Back closes an open menu first, returning to its icon
@@ -1491,6 +1538,13 @@ public class PlayerActivity extends Activity {
             }
 
             startTimeoutPending = true;
+            skipSegments.clear();
+            skipSegmentsLoaded = false;
+            skipShown = null;
+            skipDismissed = null;
+            if (skipButton != null) {
+                skipButton.setVisibility(View.GONE);
+            }
             mediaIdentity = MediaIdentity.fromUri(mPrefs.mediaUri);
             mediaMeta = null;
             mediaPoster = null;
@@ -1670,6 +1724,7 @@ public class PlayerActivity extends Activity {
 
                 if (videoLoading) {
                     videoLoading = false;
+                    loadSkipSegments();
 
                     if (mPrefs.orientation == Utils.Orientation.UNSPECIFIED) {
                         mPrefs.orientation = Utils.getNextOrientation(mPrefs.orientation);
@@ -2167,6 +2222,86 @@ public class PlayerActivity extends Activity {
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                 .setOverrideForType(new TrackSelectionOverride(group.getMediaTrackGroup(), match[1]))
                 .build());
+    }
+
+    // Chapters named for it first; otherwise TheIntroDB, if allowed, for titles the stream identifies
+    private void loadSkipSegments() {
+        if (skipSegmentsLoaded || player == null) {
+            return;
+        }
+        skipSegmentsLoaded = true;
+        playerView.removeCallbacks(skipTicker);
+        playerView.post(skipTicker);
+        final List<SkipSegments.Segment> fromChapters = SkipSegments.fromChapters(chapters);
+        if (!fromChapters.isEmpty()) {
+            skipSegments.addAll(fromChapters);
+            return;
+        }
+        final MediaIdentity identity = mediaIdentity;
+        if (!mPrefs.skipLookup || identity == null || identity.imdbId == null) {
+            return;
+        }
+        final long durationMs = player.getDuration() == C.TIME_UNSET ? 0 : player.getDuration();
+        background.execute(() -> {
+            try {
+                final List<SkipSegments.Segment> found = SkipSegments.fromTheIntroDb(identity, durationMs);
+                runOnUiThread(() -> {
+                    if (identity == mediaIdentity) {
+                        skipSegments.addAll(found);
+                        updateSkipButton();
+                    }
+                });
+            } catch (Exception e) {
+                // No skip button then; playback is unaffected
+            }
+        });
+    }
+
+    // Shown while playback is inside a segment, for its first 15 seconds, and only while the controls are hidden
+    private void updateSkipButton() {
+        if (skipButton == null || player == null) {
+            return;
+        }
+        final long position = player.getCurrentPosition();
+        final long duration = player.getDuration() == C.TIME_UNSET ? 0 : player.getDuration();
+        SkipSegments.Segment current = null;
+        for (SkipSegments.Segment segment : skipSegments) {
+            if (segment.contains(position, duration)) {
+                current = segment;
+                break;
+            }
+        }
+        if (current != skipShown) {
+            skipShown = current;
+            skipShownAtMs = SystemClock.uptimeMillis();
+        }
+        final boolean show = current != null && current != skipDismissed && !controllerVisible
+                && SystemClock.uptimeMillis() - skipShownAtMs < SKIP_VISIBLE_MS;
+        if (show) {
+            skipButton.setText(current.kind.label);
+            if (skipButton.getVisibility() != View.VISIBLE) {
+                skipButton.setAlpha(0f);
+                skipButton.setVisibility(View.VISIBLE);
+                skipButton.animate().alpha(1f).setDuration(200).start();
+            }
+        } else if (skipButton.getVisibility() == View.VISIBLE) {
+            skipButton.setVisibility(View.GONE);
+        }
+    }
+
+    // To the end of the segment; credits that run to the end finish the video, which hands back to Stremio
+    private void performSkip() {
+        final SkipSegments.Segment segment = skipShown;
+        if (segment == null || player == null) {
+            return;
+        }
+        skipDismissed = segment;
+        skipButton.setVisibility(View.GONE);
+        final long duration = player.getDuration();
+        final long target = segment.endMs == C.TIME_END_OF_SOURCE ? duration : segment.endMs;
+        if (target != C.TIME_UNSET) {
+            player.seekTo(target);
+        }
     }
 
     // Autoplay used to hide the controls the moment playback started; on a TV that is exactly when the screen blanks
