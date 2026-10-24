@@ -38,7 +38,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
+import android.view.ViewGroup;
 import android.widget.ImageButton;
 import android.widget.Toast;
 
@@ -407,7 +407,7 @@ class Utils {
     }
 
     public static void setViewMargins(final View view, int marginLeft, int marginTop, int marginRight, int marginBottom) {
-        final FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) view.getLayoutParams();
+        final ViewGroup.MarginLayoutParams layoutParams = (ViewGroup.MarginLayoutParams) view.getLayoutParams();
         layoutParams.setMargins(marginLeft, marginTop, marginRight, marginBottom);
         view.setLayoutParams(layoutParams);
     }

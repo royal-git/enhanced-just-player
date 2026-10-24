@@ -31,4 +31,28 @@
         <item name="android:ellipsize">end</item>
         <item name="android:singleLine">true</item> <!-- When focused, line scrolls -->
     </style>
+
+    <style name="TvIconButton">
+        <item name="android:layout_width">44dp</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:layout_marginStart">12dp</item>
+        <item name="android:padding">10dp</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:focusable">true</item>
+        <item name="android:background">@drawable/tv_icon_button_background</item>
+        <item name="android:tint">@color/tv_icon_tint</item>
+    </style>
+
+
+
+    <style name="TvInfoColumn">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginEnd">36dp</item>
+        <item name="android:minWidth">150dp</item>
+        <item name="android:lineSpacingMultiplier">1.2</item>
+        <item name="android:textColor">#FF1C1C1E</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">@font/outfit_regular</item>
+    </style>
 </resources>

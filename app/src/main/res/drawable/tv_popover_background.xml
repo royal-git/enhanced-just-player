@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Light frosted menu, as tvOS draws it; Android 11 has no live blur, so the fill is nearly opaque -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#F0DCDCE0" />
+    <corners android:radius="18dp" />
+</shape>

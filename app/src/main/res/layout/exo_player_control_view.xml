@@ -6,98 +6,268 @@
       android:layout_width="match_parent"
       android:layout_height="match_parent"
       android:layout_gravity="center"
+      android:background="@drawable/controls_scrim"
       android:layoutDirection="ltr">
   </FrameLayout>
 
-  <FrameLayout android:id="@+id/exo_bottom_bar"
+  <!-- tvOS layout, anchored to the bottom: a menu grows upwards above its icon and the Info sheet
+       grows below the tabs, so both push the title and timeline up instead of covering them.
+       No animateLayoutChanges: its bounds animation briefly squeezes rows to zero height, and Android
+       drops focus from a zero-sized view. The activity animates with translation and alpha instead. -->
+  <LinearLayout android:id="@+id/control_group"
       android:layout_width="match_parent"
-      android:layout_height="@dimen/exo_styled_bottom_bar_height"
-      android:layout_marginTop="@dimen/exo_styled_bottom_bar_margin_top"
+      android:layout_height="wrap_content"
       android:layout_gravity="bottom"
-      android:background="@color/exo_bottom_bar_background"
+      android:paddingStart="@dimen/tv_controls_inset"
+      android:paddingEnd="@dimen/tv_controls_inset"
+      android:paddingBottom="36dp"
+      android:clipChildren="false"
+      android:clipToPadding="false"
+      android:orientation="vertical"
       android:layoutDirection="ltr">
 
-    <LinearLayout android:id="@+id/exo_time"
+    <LinearLayout android:id="@+id/popover"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:paddingStart="@dimen/exo_styled_bottom_bar_time_padding"
-        android:paddingEnd="@dimen/exo_styled_bottom_bar_time_padding"
-        android:paddingLeft="@dimen/exo_styled_bottom_bar_time_padding"
-        android:paddingRight="@dimen/exo_styled_bottom_bar_time_padding"
-        android:layout_gravity="center_vertical|start"
-        android:layoutDirection="ltr">
+        android:layout_gravity="end"
+        android:layout_marginBottom="12dp"
+        android:minWidth="300dp"
+        android:padding="8dp"
+        android:background="@drawable/tv_popover_background"
+        android:orientation="vertical"
+        android:visibility="gone">
 
-      <TextView android:id="@+id/exo_position"
-          style="@style/ExoStyledControls.TimeText.Position"/>
-
-      <TextView
-          style="@style/ExoStyledControls.TimeText.Separator"/>
-
-      <TextView android:id="@+id/exo_duration"
-          style="@style/ExoStyledControls.TimeText.Duration"/>
-
-    </LinearLayout>
-
-    <LinearLayout android:id="@+id/exo_basic_controls"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical|end"
-        android:layoutDirection="ltr">
-
-      <ImageButton android:id="@+id/exo_vr"
-          style="@style/ExoStyledControls.Button.Bottom.VR"/>
-
-      <ImageButton android:id="@+id/exo_shuffle"
-          style="@style/ExoStyledControls.Button.Bottom.Shuffle"/>
-
-      <ImageButton android:id="@+id/exo_repeat_toggle"
-          style="@style/ExoStyledControls.Button.Bottom.RepeatToggle"/>
-
-      <ImageButton android:id="@+id/exo_subtitle"
-          style="@style/ExoStyledControls.Button.Bottom.CC"/>
-
-      <ImageButton android:id="@+id/exo_settings"
-          style="@style/ExoStyledControls.Button.Bottom.Settings"/>
-
-      <ImageButton android:id="@+id/exo_fullscreen"
-          style="@style/ExoStyledControls.Button.Bottom.FullScreen"/>
-
-      <ImageButton android:id="@+id/exo_overflow_show"
-          style="@style/ExoStyledControls.Button.Bottom.OverflowShow"/>
-
-    </LinearLayout>
-
-    <HorizontalScrollView android:id="@+id/exo_extra_controls_scroll_view"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical|end"
-        android:visibility="invisible">
-
-      <LinearLayout android:id="@+id/exo_extra_controls"
+      <TextView android:id="@+id/popover_header"
           android:layout_width="wrap_content"
           android:layout_height="wrap_content"
-          android:layoutDirection="ltr">
+          android:paddingStart="12dp"
+          android:paddingTop="6dp"
+          android:paddingBottom="6dp"
+          android:textColor="#FF8A8A8E"
+          android:textSize="12sp"
+          android:letterSpacing="0.1"
+          android:fontFamily="@font/outfit_semibold" />
 
-        <ImageButton android:id="@+id/exo_overflow_hide"
-            style="@style/ExoStyledControls.Button.Bottom.OverflowHide"/>
+      <LinearLayout android:id="@+id/popover_list"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:orientation="vertical" />
+
+      <!-- More > Info: read-only details in three columns, so the card stays short on a wide screen.
+           Focusable so focus stays in the menu; Back returns to More. -->
+      <LinearLayout android:id="@+id/popover_info"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:paddingStart="12dp"
+          android:paddingEnd="12dp"
+          android:paddingBottom="10dp"
+          android:focusable="true"
+          android:orientation="horizontal"
+          android:visibility="gone">
+
+        <TextView android:id="@+id/info_video" style="@style/TvInfoColumn" />
+        <TextView android:id="@+id/info_audio" style="@style/TvInfoColumn" />
+        <TextView android:id="@+id/info_subtitles" style="@style/TvInfoColumn" android:layout_marginEnd="0dp" />
 
       </LinearLayout>
 
-    </HorizontalScrollView>
+    </LinearLayout>
 
-  </FrameLayout>
+    <!-- One line: the title, then the format badges and any audio warning beside it, icons on the right.
+         Title and summary form a packed chain; a long title truncates before the summary does. -->
+    <androidx.constraintlayout.widget.ConstraintLayout android:id="@+id/title_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
 
-  <com.brouken.player.CustomDefaultTimeBar android:id="@+id/exo_progress"
-      android:layout_width="match_parent"
-      android:layout_height="@dimen/exo_styled_progress_layout_height"
-      android:layout_gravity="bottom"
-      android:layout_marginBottom="@dimen/exo_styled_progress_margin_bottom"
-      app:bar_height="@dimen/exo_styled_progress_bar_height"
-      app:bar_gravity="bottom"
-      app:touch_target_height="@dimen/exo_styled_progress_touch_target_height"
-      app:scrubber_enabled_size="@dimen/exo_styled_progress_enabled_thumb_size"
-      app:scrubber_dragged_size="@dimen/exo_styled_progress_dragged_thumb_size"
-      app:ad_marker_width="@dimen/marker_width"/>
+      <TextView android:id="@+id/title_text"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:fontFamily="@font/outfit_semibold"
+          android:textColor="#FFFFFFFF"
+          android:textSize="28sp"
+          android:maxLines="1"
+          android:ellipsize="end"
+          android:textDirection="locale"
+          android:visibility="gone"
+          app:layout_constrainedWidth="true"
+          app:layout_constraintHorizontal_bias="0"
+          app:layout_constraintHorizontal_chainStyle="packed"
+          app:layout_constraintStart_toStartOf="parent"
+          app:layout_constraintEnd_toStartOf="@id/summary_row"
+          app:layout_constraintTop_toTopOf="parent"
+          app:layout_constraintBottom_toBottomOf="parent" />
+
+      <LinearLayout android:id="@+id/summary_row"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_marginStart="18dp"
+          android:layout_marginEnd="18dp"
+          android:gravity="center_vertical"
+          android:orientation="horizontal"
+          app:layout_goneMarginStart="0dp"
+          app:layout_constraintStart_toEndOf="@id/title_text"
+          app:layout_constraintEnd_toStartOf="@id/icon_row"
+          app:layout_constraintTop_toTopOf="parent"
+          app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout android:id="@+id/badge_row"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+
+        <!-- Only shown as a warning: nothing is said when the best audio is playing -->
+        <TextView android:id="@+id/summary_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:fontFamily="@font/outfit_medium"
+            android:textColor="#FFFFD60A"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
+      </LinearLayout>
+
+      <LinearLayout android:id="@+id/icon_row"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:orientation="horizontal"
+          app:layout_constraintEnd_toEndOf="parent"
+          app:layout_constraintTop_toTopOf="parent"
+          app:layout_constraintBottom_toBottomOf="parent">
+
+        <ImageButton android:id="@+id/icon_subtitles"
+            style="@style/TvIconButton"
+            android:contentDescription="@string/tv_subtitles"
+            android:nextFocusLeft="@id/icon_subtitles"
+            android:nextFocusUp="@id/icon_subtitles"
+            android:nextFocusDown="@id/exo_progress"
+            android:src="@drawable/ic_tv_subtitles" />
+
+        <ImageButton android:id="@+id/icon_audio"
+            style="@style/TvIconButton"
+            android:contentDescription="@string/tv_audio"
+            android:nextFocusUp="@id/icon_audio"
+            android:nextFocusDown="@id/exo_progress"
+            android:src="@drawable/ic_tv_audio" />
+
+        <ImageButton android:id="@+id/icon_more"
+            style="@style/TvIconButton"
+            android:contentDescription="@string/tv_more"
+            android:nextFocusRight="@id/icon_more"
+            android:nextFocusUp="@id/icon_more"
+            android:nextFocusDown="@id/exo_progress"
+            android:src="@drawable/ic_tv_more" />
+
+      </LinearLayout>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <com.brouken.player.CustomDefaultTimeBar android:id="@+id/exo_progress"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:layout_marginTop="10dp"
+        android:nextFocusUp="@id/icon_subtitles"
+        android:nextFocusDown="@id/exo_progress"
+        app:bar_height="@dimen/exo_styled_progress_bar_height"
+        app:bar_gravity="center"
+        app:touch_target_height="28dp"
+        app:scrubber_enabled_size="0dp"
+        app:scrubber_disabled_size="0dp"
+        app:scrubber_dragged_size="0dp"
+        app:ad_marker_width="@dimen/marker_width"/>
+
+    <FrameLayout android:id="@+id/time_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+      <!-- Media3 fills exo_position; the activity moves it to sit under the playhead -->
+      <LinearLayout android:id="@+id/exo_time"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_gravity="start"
+          android:layoutDirection="ltr">
+
+        <TextView android:id="@+id/exo_position"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/outfit_medium"
+            android:textColor="#D9FFFFFF"
+            android:textSize="14sp" />
+
+        <TextView android:id="@+id/exo_duration"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+      </LinearLayout>
+
+      <TextView android:id="@+id/time_remaining"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_gravity="end"
+          android:fontFamily="@font/outfit_medium"
+          android:textColor="#D9FFFFFF"
+          android:textSize="14sp" />
+
+    </FrameLayout>
+
+    <!-- Media3 looks these up; on TV they stay hidden and More covers their actions -->
+    <FrameLayout android:id="@+id/exo_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layoutDirection="ltr">
+
+      <LinearLayout android:id="@+id/exo_basic_controls"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_gravity="end"
+          android:visibility="gone"
+          android:layoutDirection="ltr">
+
+        <ImageButton android:id="@+id/exo_vr"
+            style="@style/ExoStyledControls.Button.Bottom.VR"/>
+
+        <ImageButton android:id="@+id/exo_shuffle"
+            style="@style/ExoStyledControls.Button.Bottom.Shuffle"/>
+
+        <ImageButton android:id="@+id/exo_repeat_toggle"
+            style="@style/ExoStyledControls.Button.Bottom.RepeatToggle"/>
+
+        <ImageButton android:id="@+id/exo_subtitle"
+            style="@style/ExoStyledControls.Button.Bottom.CC"/>
+
+        <ImageButton android:id="@+id/exo_settings"
+            style="@style/ExoStyledControls.Button.Bottom.Settings"/>
+
+        <ImageButton android:id="@+id/exo_fullscreen"
+            style="@style/ExoStyledControls.Button.Bottom.FullScreen"/>
+
+        <ImageButton android:id="@+id/exo_overflow_show"
+            style="@style/ExoStyledControls.Button.Bottom.OverflowShow"/>
+
+      </LinearLayout>
+
+      <HorizontalScrollView android:id="@+id/exo_extra_controls_scroll_view"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_gravity="end"
+          android:visibility="invisible">
+
+        <LinearLayout android:id="@+id/exo_extra_controls"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layoutDirection="ltr">
+
+          <ImageButton android:id="@+id/exo_overflow_hide"
+              style="@style/ExoStyledControls.Button.Bottom.OverflowHide"/>
+
+        </LinearLayout>
+
+      </HorizontalScrollView>
+
+    </FrameLayout>
+
+  </LinearLayout>
 
   <LinearLayout android:id="@+id/exo_minimal_controls"
       android:layout_width="wrap_content"
@@ -106,6 +276,7 @@
       android:layout_marginBottom="@dimen/exo_styled_minimal_controls_margin_bottom"
       android:orientation="horizontal"
       android:gravity="center_vertical"
+      android:visibility="gone"
       android:layoutDirection="ltr">
 
     <ImageButton android:id="@+id/exo_minimal_fullscreen"
@@ -113,6 +284,7 @@
 
   </LinearLayout>
 
+  <!-- No centre button on TV: OK on the timeline plays and pauses. The spinner still shows while loading. -->
   <LinearLayout
       android:id="@+id/exo_center_controls"
       android:layout_width="wrap_content"
@@ -132,7 +304,8 @@
     <include layout="@layout/exo_player_control_rewind_button" />
 
     <ImageButton android:id="@+id/exo_play_pause"
-        style="@style/ExoStyledControls.Button.Center.PlayPause"/>
+        style="@style/ExoStyledControls.Button.Center.PlayPause"
+        android:visibility="gone"/>
 
     <ProgressBar android:id="@+id/loading"
         style="?android:attr/progressBarStyle"

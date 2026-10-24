@@ -35,6 +35,10 @@ import android.os.Parcelable;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.ForegroundColorSpan;
+import android.text.Spanned;
+import android.text.SpannableStringBuilder;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.util.Rational;
@@ -45,6 +49,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -83,6 +88,11 @@ import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.annotation.Nullable;
+import androidx.core.content.res.ResourcesCompat;
+import androidx.media3.common.util.Util;
+import androidx.media3.exoplayer.analytics.AnalyticsListener;
+import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
@@ -98,8 +108,6 @@ import androidx.media3.ui.TimeBar;
 
 import com.brouken.player.dtpv.DoubleTapPlayerView;
 import com.brouken.player.dtpv.youtube.YouTubeOverlay;
-import com.getkeepsafe.taptargetview.TapTarget;
-import com.getkeepsafe.taptargetview.TapTargetView;
 import com.google.android.material.snackbar.Snackbar;
 
 import java.io.File;
@@ -157,6 +165,22 @@ public class PlayerActivity extends Activity {
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
+    private LinearLayout controlGroup;
+    private LinearLayout popover;
+    private TextView popoverHeader;
+    private LinearLayout popoverList;
+    private LinearLayout iconRow;
+    private View iconSubtitles;
+    private View iconAudio;
+    private View iconMore;
+    private View popoverAnchor;
+    private LinearLayout popoverInfo;
+    private LinearLayout badgeRow;
+    private TextView summaryStatus;
+    private LinearLayout exoTime;
+    private TextView timeRemaining;
+    private String videoDecoderName;
+    private Integer audioOutputEncoding;
     private ImageButton buttonOpen;
     private ImageButton buttonPiP;
     private ImageButton buttonAspectRatio;
@@ -442,20 +466,37 @@ public class PlayerActivity extends Activity {
             resetHideCallbacks();
         });
 
-        final int titleViewPaddingHorizontal = Utils.dpToPx(14);
-        final int titleViewPaddingVertical = getResources().getDimensionPixelOffset(R.dimen.exo_styled_bottom_bar_time_padding);
-        FrameLayout centerView = playerView.findViewById(R.id.exo_controls_background);
-        titleView = new TextView(this);
-        titleView.setBackgroundResource(R.color.ui_controls_background);
-        titleView.setTextColor(Color.WHITE);
-        titleView.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        titleView.setPadding(titleViewPaddingHorizontal, titleViewPaddingVertical, titleViewPaddingHorizontal, titleViewPaddingVertical);
-        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        titleView.setVisibility(View.GONE);
-        titleView.setMaxLines(1);
-        titleView.setEllipsize(TextUtils.TruncateAt.END);
-        titleView.setTextDirection(View.TEXT_DIRECTION_LOCALE);
-        centerView.addView(titleView);
+        // The title leads the bottom row, with the format badges beside it
+        final int titleViewPaddingHorizontal = 0;
+        final int titleViewPaddingVertical = 0;
+        titleView = playerView.findViewById(R.id.title_text);
+
+        controlGroup = playerView.findViewById(R.id.control_group);
+        popover = playerView.findViewById(R.id.popover);
+        popoverHeader = playerView.findViewById(R.id.popover_header);
+        popoverList = playerView.findViewById(R.id.popover_list);
+        iconRow = playerView.findViewById(R.id.icon_row);
+        iconSubtitles = playerView.findViewById(R.id.icon_subtitles);
+        iconAudio = playerView.findViewById(R.id.icon_audio);
+        iconMore = playerView.findViewById(R.id.icon_more);
+        popoverInfo = playerView.findViewById(R.id.popover_info);
+        badgeRow = playerView.findViewById(R.id.badge_row);
+        summaryStatus = playerView.findViewById(R.id.summary_status);
+        exoTime = playerView.findViewById(R.id.exo_time);
+        timeRemaining = playerView.findViewById(R.id.time_remaining);
+
+        // Media3 would slide the timeline separately from the title; the group fades in instead
+        playerView.setControllerAnimationEnabled(false);
+
+        // An icon opens its menu on OK, anchored above it; moving out of the menu closes it
+        iconSubtitles.setOnClickListener(view -> openPopover(view));
+        iconAudio.setOnClickListener(view -> openPopover(view));
+        iconMore.setOnClickListener(view -> openPopover(view));
+        playerView.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
+            if (popover.getVisibility() == View.VISIBLE && (newFocus == null || !isDescendant(popover, newFocus))) {
+                closePopover(false);
+            }
+        });
 
         titleView.setOnLongClickListener(view -> {
             // Prevent FileUriExposedException
@@ -631,7 +672,31 @@ public class PlayerActivity extends Activity {
         }
         controls.addView(exoSettings);
 
+        // Kept for their click handlers; on TV the More menu triggers them
         exoBasicControls.addView(horizontalScrollView);
+
+        // OK on the timeline plays and pauses, unless it is committing a scrub
+        timeBar.setOnKeyListener((view, keyCode, event) -> {
+            if ((keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) && !isScrubbing) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                    dispatchPlayPause();
+                }
+                return true;
+            }
+            return false;
+        });
+        timeBar.setProgressListener((position, duration) -> {
+            if (duration > 0) {
+                timeRemaining.setText("-" + Utils.formatMilis(Math.max(duration - position, 0)));
+            } else {
+                timeRemaining.setText("");
+            }
+        });
+        // The elapsed time rides under the playhead, stopping short of the remaining time
+        timeBar.setPlayheadListener(x -> {
+            final float maxX = ((View) exoTime.getParent()).getWidth() - timeRemaining.getWidth() - exoTime.getWidth() - Utils.dpToPx(16);
+            exoTime.setTranslationX(Math.max(0, Math.min(x - exoTime.getWidth() / 2f, maxX)));
+        });
 
         if (Build.VERSION.SDK_INT > 23) {
             horizontalScrollView.setOnScrollChangeListener((view, i, i1, i2, i3) -> resetHideCallbacks());
@@ -656,30 +721,16 @@ public class PlayerActivity extends Activity {
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
                 if (visibility == View.VISIBLE) {
                     // Because when using dpad controls, focus resets to first item in bottom controls bar
-                    findViewById(R.id.exo_play_pause).requestFocus();
+                    timeBar.requestFocus();
+                    updateSummary();
+                    controlGroup.setTranslationY(0f);
+                    controlGroup.setAlpha(0f);
+                    controlGroup.animate().alpha(1f).setDuration(180).start();
+                } else {
+                    closePopover(false);
                 }
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
-                    if (mPrefs.firstRun) {
-                        TapTargetView.showFor(PlayerActivity.this,
-                                TapTarget.forView(buttonOpen, getString(R.string.onboarding_open_title), getString(R.string.onboarding_open_description))
-                                        .outerCircleColor(R.color.green)
-                                        .targetCircleColor(R.color.white)
-                                        .titleTextSize(22)
-                                        .titleTextColor(R.color.white)
-                                        .descriptionTextSize(14)
-                                        .cancelable(true),
-                                new TapTargetView.Listener() {
-                                    @Override
-                                    public void onTargetClick(TapTargetView view) {
-                                        super.onTargetClick(view);
-                                        buttonOpen.performClick();
-                                    }
-                                });
-                        // TODO: Explain gestures?
-                        //  "Use vertical and horizontal gestures to change brightness, volume and seek in video"
-                        mPrefs.markFirstRun();
-                    }
                     if (errorToShow != null) {
                         showError(errorToShow);
                         errorToShow = null;
@@ -980,6 +1031,18 @@ public class PlayerActivity extends Activity {
             return true;
         }
 
+        // Back closes an open menu first, returning to its icon
+        if (popover != null && popover.getVisibility() == View.VISIBLE && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                if (popoverInfo.getVisibility() == View.VISIBLE) {
+                    openPopover(iconMore);
+                } else {
+                    closePopover(true);
+                }
+            }
+            return true;
+        }
+
         if (isTvBox && !controllerVisibleFully) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 onKeyDown(event.getKeyCode(), event);
@@ -1187,7 +1250,9 @@ public class PlayerActivity extends Activity {
             player = null;
         }
 
-        trackSelector = new DefaultTrackSelector(this);
+        trackSelector = new BestAudioTrackSelector(this);
+        videoDecoderName = null;
+        audioOutputEncoding = null;
         trackSelector.setParameters(trackSelector.buildUponParameters()
                 .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true));
         if (mPrefs.tunneling) {
@@ -1336,12 +1401,10 @@ public class PlayerActivity extends Activity {
                 play = true;
             }
 
-            if (apiTitle != null) {
-                titleView.setText(apiTitle);
-            } else {
-                titleView.setText(Utils.getFileName(this, mPrefs.mediaUri));
-            }
-            titleView.setVisibility(View.VISIBLE);
+            final String mediaTitle = apiTitle != null ? apiTitle : Utils.getFileName(this, mPrefs.mediaUri);
+            titleView.setText(mediaTitle);
+            // Stream URLs often end in a meaningless path segment; show no title rather than "n"
+            titleView.setVisibility(mediaTitle != null && mediaTitle.trim().length() > 2 ? View.VISIBLE : View.GONE);
 
             updateButtons(true);
 
@@ -1368,6 +1431,19 @@ public class PlayerActivity extends Activity {
         }
 
         player.addListener(playerListener);
+        player.addAnalyticsListener(new AnalyticsListener() {
+            @Override
+            public void onVideoDecoderInitialized(EventTime eventTime, String decoderName, long initializedTimestampMs, long initializationDurationMs) {
+                videoDecoderName = decoderName;
+                refreshPanels();
+            }
+
+            @Override
+            public void onAudioTrackInitialized(EventTime eventTime, AudioSink.AudioTrackConfig audioTrackConfig) {
+                audioOutputEncoding = audioTrackConfig.encoding;
+                refreshPanels();
+            }
+        });
         player.prepare();
 
         if (restorePlayState) {
@@ -1469,6 +1545,13 @@ public class PlayerActivity extends Activity {
             if (!isPlaying) {
                 PlayerActivity.locked = false;
             }
+
+            refreshPanels();
+        }
+
+        @Override
+        public void onTracksChanged(Tracks tracks) {
+            refreshPanels();
         }
 
         @SuppressLint("SourceLockedOrientationActivity")
@@ -1579,6 +1662,8 @@ public class PlayerActivity extends Activity {
                     finish();
                 }
             }
+
+            refreshPanels();
         }
 
         @Override
@@ -1790,6 +1875,507 @@ public class PlayerActivity extends Activity {
         }
 
         return null;
+    }
+
+    private static boolean isDescendant(View parent, View view) {
+        for (View v = view; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+            if (v == parent) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // One row of an icon's menu; a null action marks a row that cannot be picked
+    private static class MenuItem {
+        final String title;
+        final String detail;
+        final boolean checked;
+        final boolean best;
+        final Runnable action;
+        // The action changes what the menu shows instead of finishing with it
+        final boolean keepOpen;
+
+        MenuItem(String title, String detail, boolean checked, boolean best, Runnable action) {
+            this(title, detail, checked, best, action, false);
+        }
+
+        MenuItem(String title, String detail, boolean checked, boolean best, Runnable action, boolean keepOpen) {
+            this.title = title;
+            this.detail = detail;
+            this.checked = checked;
+            this.best = best;
+            this.action = action;
+            this.keepOpen = keepOpen;
+        }
+    }
+
+    private void openPopover(View anchor) {
+        // Back from More > Info: refill the list and move focus into it before the details hide
+        if (popover.getVisibility() == View.VISIBLE && popoverInfo.getVisibility() == View.VISIBLE) {
+            popoverHeader.setText("MORE");
+            final View target = popoverList.getChildAt(bindMenu(buildMenuItems(anchor)));
+            popoverList.setVisibility(View.VISIBLE);
+            if (target != null) {
+                target.requestFocus();
+            }
+            popoverInfo.setVisibility(View.GONE);
+            return;
+        }
+        popoverInfo.setVisibility(View.GONE);
+        popoverList.setVisibility(View.VISIBLE);
+        if (popoverAnchor != null) {
+            popoverAnchor.setSelected(false);
+        }
+        popoverAnchor = anchor;
+        anchor.setSelected(true);
+        popoverHeader.setText(anchor == iconSubtitles ? "SUBTITLES" : anchor == iconAudio ? "AUDIO" : "MORE");
+        final int focusRow = bindMenu(buildMenuItems(anchor));
+        // Right-align the menu with its icon
+        final LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) popover.getLayoutParams();
+        layoutParams.setMarginEnd(iconRow.getWidth() - anchor.getRight());
+        popover.setLayoutParams(layoutParams);
+        popover.setAlpha(0f);
+        popover.setTranslationY(Utils.dpToPx(10));
+        popover.setVisibility(View.VISIBLE);
+        popover.animate().alpha(1f).translationY(0f).setDuration(160).start();
+        holdControls(true);
+        final View target = popoverList.getChildAt(focusRow);
+        popover.post(() -> {
+            if (target != null && popover.getVisibility() == View.VISIBLE) {
+                target.requestFocus();
+            }
+        });
+    }
+
+    // More > Info: swap the list for the details, keeping focus inside the menu
+    // Focus moves before the list hides: hiding a focused row first sends focus out of the menu, which closes it
+    private void showPopoverInfo() {
+        popoverHeader.setText("INFO");
+        updatePopoverInfo();
+        popoverInfo.setNextFocusDownId(R.id.icon_more);
+        popoverInfo.setVisibility(View.VISIBLE);
+        popoverInfo.requestFocus();
+        popoverList.setVisibility(View.GONE);
+    }
+
+    private void closePopover(boolean restoreFocus) {
+        if (popover == null || popover.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        final View anchor = popoverAnchor;
+        popoverAnchor = null;
+        if (anchor != null) {
+            anchor.setSelected(false);
+            // Focus the icon before hiding the menu: hiding a focused menu first lets Android hand focus
+            // to the first icon in the row
+            if (restoreFocus) {
+                anchor.requestFocus();
+            }
+        }
+        popover.setVisibility(View.GONE);
+        popoverInfo.setVisibility(View.GONE);
+        holdControls(false);
+    }
+
+    // Keep the controls up while a menu or the Info sheet is open; closing them restarts the usual timeout
+    private void holdControls(boolean hold) {
+        if (hold) {
+            playerView.setControllerShowTimeoutMs(-1);
+        } else if (player != null && player.isPlaying()) {
+            playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT);
+        }
+    }
+
+    private List<MenuItem> buildMenuItems(View anchor) {
+        final List<MenuItem> items = new ArrayList<>();
+        if (anchor == iconMore) {
+            items.add(new MenuItem("Info", "video, audio, subtitles", false, false, this::showPopoverInfo, true));
+            items.add(new MenuItem("Aspect ratio", playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "Zoom" : "Fit",
+                    false, false, () -> buttonAspectRatio.performClick()));
+            if (Utils.isPiPSupported(this) && buttonPiP != null) {
+                items.add(new MenuItem("Picture in picture", null, false, false, () -> buttonPiP.performClick()));
+            }
+            items.add(new MenuItem("Open file", null, false, false, () -> buttonOpen.performClick()));
+            items.add(new MenuItem("Player settings", null, false, false,
+                    () -> startActivityForResult(new Intent(this, SettingsActivity.class), REQUEST_SETTINGS)));
+            return items;
+        }
+        if (player == null) {
+            return items;
+        }
+
+        final int trackType = anchor == iconAudio ? C.TRACK_TYPE_AUDIO : C.TRACK_TYPE_TEXT;
+        final Tracks tracks = player.getCurrentTracks();
+        final Format best = trackType == C.TRACK_TYPE_AUDIO
+                ? BestAudioTrackSelector.findBest(tracks, trackSelector.getParameters().preferredAudioLanguages) : null;
+        if (trackType == C.TRACK_TYPE_TEXT) {
+            items.add(new MenuItem("Off", null, !tracks.isTypeSelected(C.TRACK_TYPE_TEXT), false,
+                    () -> player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .build())));
+        }
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != trackType) {
+                continue;
+            }
+            for (int i = 0; i < group.length; i++) {
+                final Format format = group.getTrackFormat(i);
+                final List<String> details = new ArrayList<>();
+                if (trackType == C.TRACK_TYPE_AUDIO) {
+                    details.add(BestAudioTrackSelector.describeCodec(format));
+                    final String role = BestAudioTrackSelector.excludedRole(format);
+                    if (role != null) {
+                        details.add(role);
+                    }
+                } else {
+                    if (format.label != null && !format.label.equalsIgnoreCase(BestAudioTrackSelector.languageName(format))) {
+                        details.add(format.label);
+                    }
+                    if ((format.selectionFlags & C.SELECTION_FLAG_FORCED) != 0 && (format.label == null || !format.label.toLowerCase(Locale.ROOT).contains("forced"))) {
+                        details.add("Forced");
+                    }
+                    if ((format.roleFlags & C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND) != 0) {
+                        details.add("SDH");
+                    }
+                }
+                final boolean supported = group.isTrackSupported(i);
+                if (!supported) {
+                    details.add("can't play");
+                }
+                final TrackGroup trackGroup = group.getMediaTrackGroup();
+                final int index = i;
+                items.add(new MenuItem(BestAudioTrackSelector.languageName(format),
+                        details.isEmpty() ? null : TextUtils.join(" · ", details),
+                        group.isTrackSelected(i), format.equals(best),
+                        supported ? () -> player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                                .setTrackTypeDisabled(trackType, false)
+                                .setOverrideForType(new TrackSelectionOverride(trackGroup, index))
+                                .build()) : null));
+            }
+        }
+        if (items.isEmpty()) {
+            items.add(new MenuItem("No tracks", null, false, false, null));
+        }
+        return items;
+    }
+
+    private LinearLayout createMenuRow() {
+        final LinearLayout row = new LinearLayout(this);
+        row.setId(View.generateViewId());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setBackgroundResource(R.drawable.tv_popover_row_background);
+        row.setPadding(Utils.dpToPx(12), Utils.dpToPx(9), Utils.dpToPx(12), Utils.dpToPx(9));
+        row.setNextFocusLeftId(row.getId());
+        row.setNextFocusRightId(row.getId());
+
+        final TextView text = new TextView(this);
+        text.setTextColor(0xFF1C1C1E);
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        text.setTypeface(ResourcesCompat.getFont(this, R.font.outfit_medium));
+        text.setSingleLine(true);
+        // Wrap rather than 0dp, so a long row widens the menu instead of being cut off
+        row.addView(text, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        final TextView best = new TextView(this);
+        best.setText("BEST");
+        best.setTextColor(0xFF0A7AFF);
+        best.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        best.setLetterSpacing(0.08f);
+        best.setTypeface(ResourcesCompat.getFont(this, R.font.outfit_semibold));
+        final LinearLayout.LayoutParams bestParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bestParams.setMarginStart(Utils.dpToPx(16));
+        row.addView(best, bestParams);
+
+        final TextView check = new TextView(this);
+        check.setText("✓");
+        check.setTextColor(0xFF1C1C1E);
+        check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        final LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        checkParams.setMarginStart(Utils.dpToPx(14));
+        row.addView(check, checkParams);
+        return row;
+    }
+
+    // Fills the menu; rows are updated in place when the count is unchanged, so the focused row keeps focus.
+    // Returns the row to focus: the checked one, otherwise the first that can be picked.
+    private int bindMenu(List<MenuItem> items) {
+        if (popoverList.getChildCount() != items.size()) {
+            popoverList.removeAllViews();
+            for (int i = 0; i < items.size(); i++) {
+                popoverList.addView(createMenuRow(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+        }
+        int checkedRow = -1;
+        int firstEnabledRow = -1;
+        for (int i = 0; i < items.size(); i++) {
+            final MenuItem item = items.get(i);
+            final LinearLayout row = (LinearLayout) popoverList.getChildAt(i);
+            final SpannableStringBuilder text = new SpannableStringBuilder(item.title);
+            if (item.detail != null) {
+                final int start = text.length();
+                text.append("   ").append(item.detail);
+                text.setSpan(new ForegroundColorSpan(0xFF6E6E73), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                text.setSpan(new RelativeSizeSpan(0.85f), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            ((TextView) row.getChildAt(0)).setText(text);
+            row.getChildAt(0).setAlpha(item.action == null ? 0.45f : 1f);
+            row.getChildAt(1).setVisibility(item.best ? View.VISIBLE : View.GONE);
+            row.getChildAt(2).setVisibility(item.checked ? View.VISIBLE : View.INVISIBLE);
+            row.setFocusable(item.action != null);
+            row.setOnClickListener(item.action == null ? null : view -> {
+                item.action.run();
+                if (!item.keepOpen) {
+                    closePopover(true);
+                }
+            });
+            row.setNextFocusUpId(i == 0 ? row.getId() : View.NO_ID);
+            row.setNextFocusDownId(i == items.size() - 1 && popoverAnchor != null ? popoverAnchor.getId() : View.NO_ID);
+            if (item.checked && item.action != null) {
+                checkedRow = i;
+            }
+            if (firstEnabledRow < 0 && item.action != null) {
+                firstEnabledRow = i;
+            }
+        }
+        return checkedRow >= 0 ? checkedRow : Math.max(firstEnabledRow, 0);
+    }
+
+    // Called on track, decoder and playback changes: keeps the summary and an open menu current
+    private void refreshPanels() {
+        if (popover == null) {
+            return;
+        }
+        updateSummary();
+        if (popover.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        if (popoverInfo.getVisibility() == View.VISIBLE) {
+            updatePopoverInfo();
+        } else if (popoverAnchor == iconAudio || popoverAnchor == iconSubtitles) {
+            bindMenu(buildMenuItems(popoverAnchor));
+        }
+    }
+
+    @Nullable
+    private Format selectedFormat(int trackType) {
+        if (player == null) {
+            return null;
+        }
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != trackType) {
+                continue;
+            }
+            for (int i = 0; i < group.length; i++) {
+                if (group.isTrackSelected(i)) {
+                    return group.getTrackFormat(i);
+                }
+            }
+        }
+        return null;
+    }
+
+    private void updatePopoverInfo() {
+        if (player == null) {
+            return;
+        }
+        final Format video = selectedFormat(C.TRACK_TYPE_VIDEO);
+        final List<String> videoLines = new ArrayList<>();
+        if (video != null) {
+            videoLines.add(describeVideo(video));
+            if (videoDecoderName != null) {
+                videoLines.add(isSoftwareDecoder(videoDecoderName) ? "Software decoding" : "Hardware decoding");
+            }
+            final float refreshRate = getWindowManager().getDefaultDisplay().getMode().getRefreshRate();
+            if (video.frameRate > 0) {
+                final int multiple = Math.round(refreshRate / video.frameRate);
+                final boolean matched = multiple >= 1 && Math.abs(refreshRate - multiple * video.frameRate) / refreshRate < 0.0005f;
+                videoLines.add(String.format(Locale.US, "%.3f fps on %.3f Hz %s", video.frameRate, refreshRate, matched ? "✓" : "✗"));
+            } else {
+                videoLines.add(String.format(Locale.US, "TV at %.3f Hz", refreshRate));
+            }
+        } else {
+            videoLines.add("No video");
+        }
+
+
+        final Tracks tracks = player.getCurrentTracks();
+        Format audio = null;
+        int audioTrackCount = 0;
+        int audioTrackNumber = 0;
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_AUDIO) {
+                continue;
+            }
+            for (int i = 0; i < group.length; i++) {
+                audioTrackCount++;
+                if (group.isTrackSelected(i)) {
+                    audio = group.getTrackFormat(i);
+                    audioTrackNumber = audioTrackCount;
+                }
+            }
+        }
+        final Format bestAudio = BestAudioTrackSelector.findBest(tracks, trackSelector.getParameters().preferredAudioLanguages);
+        final List<String> audioLines = new ArrayList<>();
+        if (audio != null) {
+            audioLines.add(BestAudioTrackSelector.describeAudio(audio));
+            final List<String> details = new ArrayList<>();
+            if (audioOutputEncoding != null) {
+                details.add(Util.isEncodingLinearPcm(audioOutputEncoding) ? "Decoded to PCM" : "Passthrough ✓");
+            }
+            details.add("track " + audioTrackNumber + " of " + audioTrackCount);
+            audioLines.add(TextUtils.join(" · ", details));
+            if (bestAudio != null && !audio.equals(bestAudio)) {
+                audioLines.add("⚠ Better: " + BestAudioTrackSelector.describeCodec(bestAudio) + " · " + BestAudioTrackSelector.languageName(bestAudio));
+            } else {
+                audioLines.add("✓ Best track");
+            }
+        } else {
+            audioLines.add(audioTrackCount > 0 ? "Audio is off" : "No audio");
+        }
+
+
+        final Format subtitles = selectedFormat(C.TRACK_TYPE_TEXT);
+        int subtitleTrackCount = 0;
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() == C.TRACK_TYPE_TEXT) {
+                subtitleTrackCount += group.length;
+            }
+        }
+        final List<String> subtitleLines = new ArrayList<>();
+        if (subtitles != null) {
+            subtitleLines.add(BestAudioTrackSelector.languageName(subtitles));
+            if (subtitles.label != null && !subtitles.label.equalsIgnoreCase(BestAudioTrackSelector.languageName(subtitles))) {
+                subtitleLines.add(subtitles.label);
+            }
+        } else {
+            subtitleLines.add("Off");
+        }
+        subtitleLines.add(subtitleTrackCount == 1 ? "1 track" : subtitleTrackCount + " tracks");
+        ((TextView) popoverInfo.findViewById(R.id.info_video)).setText(infoColumn("VIDEO", videoLines));
+        ((TextView) popoverInfo.findViewById(R.id.info_audio)).setText(infoColumn("AUDIO", audioLines));
+        ((TextView) popoverInfo.findViewById(R.id.info_subtitles)).setText(infoColumn("SUBTITLES", subtitleLines));
+    }
+
+    private static CharSequence infoColumn(String header, List<String> lines) {
+        final SpannableStringBuilder text = new SpannableStringBuilder(header);
+        text.setSpan(new ForegroundColorSpan(0xFF8A8A8E), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new RelativeSizeSpan(0.78f), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.append("\n").append(TextUtils.join("\n", lines));
+        return text;
+    }
+
+    // The line under the title: format badges and an audio verdict, so the essentials need no extra step
+    private void updateSummary() {
+        if (player == null || badgeRow == null) {
+            return;
+        }
+        final Format video = selectedFormat(C.TRACK_TYPE_VIDEO);
+        final Format audio = selectedFormat(C.TRACK_TYPE_AUDIO);
+        updateBadges(video, audio);
+        final Format bestAudio = BestAudioTrackSelector.findBest(player.getCurrentTracks(), trackSelector.getParameters().preferredAudioLanguages);
+        // Silent when the best audio is playing; only a problem is worth a word
+        String warning = null;
+        if (audio == null && bestAudio != null) {
+            warning = "⚠ Audio is off";
+        } else if (audio != null && bestAudio != null && !audio.equals(bestAudio)) {
+            warning = "⚠ Better audio available";
+        }
+        summaryStatus.setText(warning);
+        summaryStatus.setVisibility(warning == null ? View.GONE : View.VISIBLE);
+    }
+
+    private void updateBadges(@Nullable Format video, @Nullable Format audio) {
+        final List<String> badges = new ArrayList<>();
+        if (video != null) {
+            if (video.width >= 3200 || video.height >= 2000) {
+                badges.add("4K");
+            } else if (video.width >= 1800 || video.height >= 1000) {
+                badges.add("HD");
+            }
+            final String dynamicRange = describeVideo(video).split(" · ")[0];
+            if (dynamicRange.startsWith("Dolby Vision")) {
+                badges.add("DOLBY VISION");
+            } else if (!"SDR".equals(dynamicRange)) {
+                badges.add(dynamicRange);
+            }
+        }
+        if (audio != null) {
+            if (BestAudioTrackSelector.isObjectAudio(audio)) {
+                badges.add(BestAudioTrackSelector.describeCodec(audio).contains("DTS:X") ? "DTS:X" : "DOLBY ATMOS");
+            } else if (audio.channelCount >= 6) {
+                badges.add(audio.channelCount >= 8 ? "7.1" : "5.1");
+            }
+        }
+
+        badgeRow.removeAllViews();
+        for (String badge : badges) {
+            final TextView view = new TextView(this);
+            view.setText(badge);
+            view.setTextColor(0xE6FFFFFF);
+            view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            view.setLetterSpacing(0.08f);
+            view.setTypeface(ResourcesCompat.getFont(this, R.font.outfit_semibold));
+            view.setBackgroundResource(R.drawable.tv_badge_background);
+            view.setPadding(Utils.dpToPx(6), Utils.dpToPx(2), Utils.dpToPx(6), Utils.dpToPx(2));
+            final LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            layoutParams.setMarginEnd(Utils.dpToPx(8));
+            badgeRow.addView(view, layoutParams);
+        }
+    }
+
+    private static String describeVideo(Format format) {
+        final String codecs = format.codecs == null ? "" : format.codecs;
+        final String mime = format.sampleMimeType == null ? "" : format.sampleMimeType;
+
+        String dynamicRange = "SDR";
+        if (MimeTypes.VIDEO_DOLBY_VISION.equals(mime) || codecs.startsWith("dvhe") || codecs.startsWith("dvh1") || codecs.startsWith("dav1")) {
+            dynamicRange = "Dolby Vision";
+            final String[] parts = codecs.split("\\.");
+            if (parts.length > 1) {
+                try {
+                    dynamicRange += " P" + Integer.parseInt(parts[1]);
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        } else if (format.colorInfo != null && format.colorInfo.colorTransfer == C.COLOR_TRANSFER_ST2084) {
+            dynamicRange = "HDR10";
+        } else if (format.colorInfo != null && format.colorInfo.colorTransfer == C.COLOR_TRANSFER_HLG) {
+            dynamicRange = "HLG";
+        }
+
+        final String codec;
+        if (codecs.startsWith("dav1") || MimeTypes.VIDEO_AV1.equals(mime)) {
+            codec = "AV1";
+        } else if (MimeTypes.VIDEO_DOLBY_VISION.equals(mime) || MimeTypes.VIDEO_H265.equals(mime)) {
+            codec = "HEVC";
+        } else if (MimeTypes.VIDEO_H264.equals(mime)) {
+            codec = "AVC";
+        } else if (MimeTypes.VIDEO_VP9.equals(mime)) {
+            codec = "VP9";
+        } else {
+            codec = mime.replace("video/", "").toUpperCase(Locale.ROOT);
+        }
+
+        final String resolution;
+        if (format.width >= 3200 || format.height >= 2000) {
+            resolution = "2160p";
+        } else if (format.width >= 1800 || format.height >= 1000) {
+            resolution = "1080p";
+        } else if (format.width >= 1200 || format.height >= 700) {
+            resolution = "720p";
+        } else {
+            resolution = format.height + "p";
+        }
+
+        return dynamicRange + " · " + codec + " · " + resolution;
+    }
+
+    private static boolean isSoftwareDecoder(String decoderName) {
+        final String name = decoderName.toLowerCase(Locale.ROOT);
+        return name.startsWith("omx.google.") || name.startsWith("c2.android.") || name.contains("ffmpeg") || name.contains("dav1d") || name.contains("gav1");
     }
 
     void setSubtitleTextSize() {
@@ -2097,10 +2683,9 @@ public class PlayerActivity extends Activity {
             loadingProgressBar.setVisibility(View.VISIBLE);
         } else {
             loadingProgressBar.setVisibility(View.GONE);
-            exoPlayPause.setVisibility(View.VISIBLE);
             if (focusPlay) {
                 focusPlay = false;
-                exoPlayPause.requestFocus();
+                timeBar.requestFocus();
             }
         }
     }

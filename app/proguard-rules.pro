@@ -28,6 +28,7 @@
 # CustomDefaultTimeBar
 -keepclassmembers class androidx.media3.ui.DefaultTimeBar {
     private android.graphics.Rect scrubberBar;
+    private android.graphics.Rect progressBar;
     private void startScrubbing(long);
 }
 # PlayerActivity

@@ -8,7 +8,11 @@
 
     <dimen name="exo_styled_progress_enabled_thumb_size" tools:keep="@dimen/exo_styled_progress_enabled_thumb_size">12dp</dimen>
     <dimen name="exo_styled_progress_dragged_thumb_size" tools:keep="@dimen/exo_styled_progress_dragged_thumb_size">18dp</dimen>
-    <dimen name="exo_styled_progress_margin_bottom" tools:keep="@dimen/exo_styled_progress_margin_bottom">51dp</dimen>
+    <dimen name="exo_styled_progress_margin_bottom" tools:keep="@dimen/exo_styled_progress_margin_bottom">0dp</dimen>
+    <dimen name="exo_styled_progress_bar_height" tools:keep="@dimen/exo_styled_progress_bar_height">5dp</dimen>
+    <dimen name="exo_styled_bottom_bar_height" tools:keep="@dimen/exo_styled_bottom_bar_height">80dp</dimen>
+
+    <dimen name="tv_controls_inset">48dp</dimen>
 
     <dimen name="marker_width">3dp</dimen>
 </resources>
