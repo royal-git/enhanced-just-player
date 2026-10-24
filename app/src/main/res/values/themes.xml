@@ -51,7 +51,7 @@
         <item name="android:layout_marginEnd">36dp</item>
         <item name="android:minWidth">150dp</item>
         <item name="android:lineSpacingMultiplier">1.2</item>
-        <item name="android:textColor">#FF1C1C1E</item>
+        <item name="android:textColor">#E6FFFFFF</item>
         <item name="android:textSize">15sp</item>
         <item name="android:fontFamily">@font/outfit_regular</item>
     </style>

@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Focused, or anchoring an open menu: a white disc -->
+<!-- Focused, or anchoring an open menu: a light disc, kept below full white so it does not glare in HDR -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="oval">
-            <solid android:color="#F2FFFFFF" />
+            <solid android:color="#D1E8E8ED" />
         </shape>
     </item>
     <item android:state_selected="true">
         <shape android:shape="oval">
-            <solid android:color="#F2FFFFFF" />
+            <solid android:color="#D1E8E8ED" />
         </shape>
     </item>
     <item>

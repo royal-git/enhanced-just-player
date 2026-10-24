@@ -43,7 +43,7 @@
           android:paddingStart="12dp"
           android:paddingTop="6dp"
           android:paddingBottom="6dp"
-          android:textColor="#FF8A8A8E"
+          android:textColor="#8CFFFFFF"
           android:textSize="12sp"
           android:letterSpacing="0.1"
           android:fontFamily="@font/outfit_semibold" />
@@ -68,6 +68,36 @@
         <TextView android:id="@+id/info_video" style="@style/TvInfoColumn" />
         <TextView android:id="@+id/info_audio" style="@style/TvInfoColumn" />
         <TextView android:id="@+id/info_subtitles" style="@style/TvInfoColumn" android:layout_marginEnd="0dp" />
+
+      </LinearLayout>
+
+      <!-- More > About: poster and title details. Focusable so focus stays in the menu; Back returns to More. -->
+      <LinearLayout android:id="@+id/popover_about"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:paddingStart="12dp"
+          android:paddingEnd="12dp"
+          android:paddingTop="2dp"
+          android:paddingBottom="12dp"
+          android:focusable="true"
+          android:orientation="horizontal"
+          android:visibility="gone">
+
+        <ImageView android:id="@+id/about_poster"
+            android:layout_width="104dp"
+            android:layout_height="156dp"
+            android:layout_marginEnd="20dp"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
+        <TextView android:id="@+id/about_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="560dp"
+            android:lineSpacingMultiplier="1.2"
+            android:fontFamily="@font/outfit_regular"
+            android:textColor="#E6FFFFFF"
+            android:textSize="15sp" />
 
       </LinearLayout>
 

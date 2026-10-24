@@ -22,6 +22,10 @@ import android.content.UriPermission;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.widget.ImageView;
+import android.view.ViewOutlineProvider;
+import android.graphics.Outline;
+import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.graphics.drawable.Icon;
 import android.hardware.display.DisplayManager;
@@ -117,6 +121,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -175,6 +181,11 @@ public class PlayerActivity extends Activity {
     private View iconMore;
     private View popoverAnchor;
     private LinearLayout popoverInfo;
+    private LinearLayout popoverAbout;
+    @Nullable private MediaIdentity mediaIdentity;
+    @Nullable private Cinemeta.Meta mediaMeta;
+    @Nullable private Bitmap mediaPoster;
+    private static final ExecutorService background = Executors.newSingleThreadExecutor();
     private LinearLayout badgeRow;
     private TextView summaryStatus;
     private LinearLayout exoTime;
@@ -480,6 +491,15 @@ public class PlayerActivity extends Activity {
         iconAudio = playerView.findViewById(R.id.icon_audio);
         iconMore = playerView.findViewById(R.id.icon_more);
         popoverInfo = playerView.findViewById(R.id.popover_info);
+        popoverAbout = playerView.findViewById(R.id.popover_about);
+        final View aboutPoster = popoverAbout.findViewById(R.id.about_poster);
+        aboutPoster.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), Utils.dpToPx(10));
+            }
+        });
+        aboutPoster.setClipToOutline(true);
         badgeRow = playerView.findViewById(R.id.badge_row);
         summaryStatus = playerView.findViewById(R.id.summary_status);
         exoTime = playerView.findViewById(R.id.exo_time);
@@ -1036,7 +1056,7 @@ public class PlayerActivity extends Activity {
         // Back closes an open menu first, returning to its icon
         if (popover != null && popover.getVisibility() == View.VISIBLE && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
-                if (popoverInfo.getVisibility() == View.VISIBLE) {
+                if (isDetailShown()) {
                     openPopover(iconMore);
                 } else {
                     closePopover(true);
@@ -1416,10 +1436,11 @@ public class PlayerActivity extends Activity {
                 play = true;
             }
 
-            final String mediaTitle = apiTitle != null ? apiTitle : Utils.getFileName(this, mPrefs.mediaUri);
-            titleView.setText(mediaTitle);
-            // Stream URLs often end in a meaningless path segment; show no title rather than "n"
-            titleView.setVisibility(mediaTitle != null && mediaTitle.trim().length() > 2 ? View.VISIBLE : View.GONE);
+            mediaIdentity = MediaIdentity.fromUri(mPrefs.mediaUri);
+            mediaMeta = null;
+            mediaPoster = null;
+            updateTitle();
+            loadMediaMeta();
 
             updateButtons(true);
 
@@ -1892,6 +1913,151 @@ public class PlayerActivity extends Activity {
         return null;
     }
 
+    // The title the stream link names, refined with the episode name once Cinemeta answers.
+    // Without an identity, the file name; stream URLs often end in a meaningless segment, so a too-short one is hidden.
+    private void updateTitle() {
+        if (mediaIdentity == null || mediaIdentity.name == null) {
+            final String mediaTitle = apiTitle != null ? apiTitle : Utils.getFileName(this, mPrefs.mediaUri);
+            titleView.setText(mediaTitle);
+            titleView.setVisibility(mediaTitle != null && mediaTitle.trim().length() > 2 ? View.VISIBLE : View.GONE);
+            return;
+        }
+        final SpannableStringBuilder title = new SpannableStringBuilder(mediaMeta != null && !mediaMeta.name.isEmpty() ? mediaMeta.name : mediaIdentity.name);
+        if (mediaIdentity.isEpisode()) {
+            final int start = title.length();
+            title.append("   S").append(String.valueOf(mediaIdentity.season)).append(" · E").append(String.valueOf(mediaIdentity.episode));
+            if (mediaMeta != null && mediaMeta.episode != null && mediaMeta.episode.name != null) {
+                title.append("  ").append(toTitleCase(mediaMeta.episode.name));
+            }
+            title.setSpan(new ForegroundColorSpan(0xB3FFFFFF), start, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            title.setSpan(new RelativeSizeSpan(0.62f), start, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        titleView.setText(title);
+        titleView.setVisibility(View.VISIBLE);
+    }
+
+    // Some catalogues shout episode names ("FIRST PERIOD"); tone those down
+    private static String toTitleCase(String text) {
+        if (!text.equals(text.toUpperCase(Locale.ROOT))) {
+            return text;
+        }
+        final StringBuilder out = new StringBuilder(text.length());
+        boolean startOfWord = true;
+        for (char c : text.toLowerCase(Locale.ROOT).toCharArray()) {
+            out.append(startOfWord ? Character.toUpperCase(c) : c);
+            startOfWord = Character.isWhitespace(c) || c == '-';
+        }
+        return out.toString();
+    }
+
+    private void loadMediaMeta() {
+        final MediaIdentity identity = mediaIdentity;
+        if (identity == null || identity.imdbId == null) {
+            return;
+        }
+        final android.content.Context context = getApplicationContext();
+        background.execute(() -> {
+            try {
+                final Cinemeta.Meta meta = Cinemeta.fetch(context, identity);
+                runOnUiThread(() -> {
+                    if (identity != mediaIdentity) {
+                        return;
+                    }
+                    mediaMeta = meta;
+                    updateTitle();
+                    refreshPanels();
+                    loadPoster(identity, meta);
+                });
+            } catch (Exception e) {
+                // No details then: the player works the same without them
+            }
+        });
+    }
+
+    private void loadPoster(MediaIdentity identity, Cinemeta.Meta meta) {
+        if (meta.poster == null) {
+            return;
+        }
+        final int width = Utils.dpToPx(104) * 2;
+        background.execute(() -> {
+            try {
+                final Bitmap poster = Cinemeta.fetchImage(meta.poster, width);
+                runOnUiThread(() -> {
+                    if (identity == mediaIdentity) {
+                        mediaPoster = poster;
+                        refreshPanels();
+                    }
+                });
+            } catch (Exception e) {
+                // About still reads well without the picture
+            }
+        });
+    }
+
+    private void updatePopoverAbout() {
+        final ImageView poster = popoverAbout.findViewById(R.id.about_poster);
+        final TextView text = popoverAbout.findViewById(R.id.about_text);
+        poster.setImageBitmap(mediaPoster);
+        poster.setVisibility(mediaPoster != null ? View.VISIBLE : View.GONE);
+        if (mediaMeta == null) {
+            text.setText(mediaIdentity != null && mediaIdentity.name != null ? mediaIdentity.name + "\nLoading details…" : "Loading details…");
+            return;
+        }
+        final Cinemeta.Meta meta = mediaMeta;
+        final SpannableStringBuilder about = new SpannableStringBuilder();
+        appendStyled(about, meta.name, 1.35f, 0xEBFFFFFF, true);
+        if (meta.episode != null) {
+            final StringBuilder episodeLine = new StringBuilder("S" + meta.episode.season + " · E" + meta.episode.number);
+            if (meta.episode.name != null) {
+                episodeLine.append("  ").append(toTitleCase(meta.episode.name));
+            }
+            about.append("\n");
+            appendStyled(about, episodeLine.toString(), 1.05f, 0xEBFFFFFF, true);
+        }
+        final List<String> facts = new ArrayList<>();
+        if (meta.releaseInfo != null) {
+            facts.add(meta.releaseInfo);
+        }
+        if (meta.runtime != null) {
+            facts.add(meta.runtime);
+        }
+        if (meta.imdbRating != null) {
+            facts.add("★ " + meta.imdbRating + " IMDb");
+        }
+        if (!meta.genres.isEmpty()) {
+            facts.add(TextUtils.join(", ", meta.genres.subList(0, Math.min(3, meta.genres.size()))));
+        }
+        if (!facts.isEmpty()) {
+            about.append("\n");
+            appendStyled(about, TextUtils.join(" · ", facts), 0.9f, 0x8CFFFFFF, false);
+        }
+        final String overview = meta.episode != null && meta.episode.overview != null ? meta.episode.overview : meta.description;
+        if (overview != null) {
+            about.append("\n\n").append(overview);
+        }
+        if (!meta.cast.isEmpty()) {
+            about.append("\n\n");
+            appendStyled(about, "Starring  ", 0.9f, 0x8CFFFFFF, false);
+            about.append(TextUtils.join(", ", meta.cast.subList(0, Math.min(4, meta.cast.size()))));
+        }
+        if (!meta.directors.isEmpty()) {
+            about.append("\n");
+            appendStyled(about, "Director  ", 0.9f, 0x8CFFFFFF, false);
+            about.append(TextUtils.join(", ", meta.directors));
+        }
+        text.setText(about);
+    }
+
+    private static void appendStyled(SpannableStringBuilder text, String value, float size, int color, boolean medium) {
+        final int start = text.length();
+        text.append(value);
+        text.setSpan(new RelativeSizeSpan(size), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new ForegroundColorSpan(color), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (medium) {
+            text.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+    }
+
     private static boolean isDescendant(View parent, View view) {
         for (View v = view; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
             if (v == parent) {
@@ -1926,8 +2092,8 @@ public class PlayerActivity extends Activity {
     }
 
     private void openPopover(View anchor) {
-        // Back from More > Info: refill the list and move focus into it before the details hide
-        if (popover.getVisibility() == View.VISIBLE && popoverInfo.getVisibility() == View.VISIBLE) {
+        // Back from a More detail page: refill the list and move focus into it before the details hide
+        if (popover.getVisibility() == View.VISIBLE && isDetailShown()) {
             popoverHeader.setText("MORE");
             final View target = popoverList.getChildAt(bindMenu(buildMenuItems(anchor)));
             popoverList.setVisibility(View.VISIBLE);
@@ -1935,9 +2101,11 @@ public class PlayerActivity extends Activity {
                 target.requestFocus();
             }
             popoverInfo.setVisibility(View.GONE);
+            popoverAbout.setVisibility(View.GONE);
             return;
         }
         popoverInfo.setVisibility(View.GONE);
+        popoverAbout.setVisibility(View.GONE);
         popoverList.setVisibility(View.VISIBLE);
         if (popoverAnchor != null) {
             popoverAnchor.setSelected(false);
@@ -1968,10 +2136,25 @@ public class PlayerActivity extends Activity {
     private void showPopoverInfo() {
         popoverHeader.setText("INFO");
         updatePopoverInfo();
-        popoverInfo.setNextFocusDownId(R.id.icon_more);
-        popoverInfo.setVisibility(View.VISIBLE);
-        popoverInfo.requestFocus();
+        showDetail(popoverInfo);
+    }
+
+    // More > About: the title's details from Cinemeta
+    private void showPopoverAbout() {
+        popoverHeader.setText("ABOUT");
+        updatePopoverAbout();
+        showDetail(popoverAbout);
+    }
+
+    private void showDetail(View detail) {
+        detail.setNextFocusDownId(R.id.icon_more);
+        detail.setVisibility(View.VISIBLE);
+        detail.requestFocus();
         popoverList.setVisibility(View.GONE);
+    }
+
+    private boolean isDetailShown() {
+        return popoverInfo.getVisibility() == View.VISIBLE || popoverAbout.getVisibility() == View.VISIBLE;
     }
 
     private void closePopover(boolean restoreFocus) {
@@ -1990,6 +2173,7 @@ public class PlayerActivity extends Activity {
         }
         popover.setVisibility(View.GONE);
         popoverInfo.setVisibility(View.GONE);
+        popoverAbout.setVisibility(View.GONE);
         holdControls(false);
     }
 
@@ -2024,6 +2208,20 @@ public class PlayerActivity extends Activity {
     private List<MenuItem> buildMenuItems(View anchor) {
         final List<MenuItem> items = new ArrayList<>();
         if (anchor == iconMore) {
+            if (mediaIdentity != null && mediaIdentity.imdbId != null) {
+                String detail = null;
+                if (mediaMeta != null) {
+                    final List<String> parts = new ArrayList<>();
+                    if (mediaMeta.imdbRating != null) {
+                        parts.add("★ " + mediaMeta.imdbRating);
+                    }
+                    if (mediaMeta.releaseInfo != null) {
+                        parts.add(mediaMeta.releaseInfo);
+                    }
+                    detail = parts.isEmpty() ? null : TextUtils.join(" · ", parts);
+                }
+                items.add(new MenuItem("About", detail, false, false, this::showPopoverAbout, true));
+            }
             items.add(new MenuItem("Info", "video, audio, subtitles", false, false, this::showPopoverInfo, true));
             items.add(new MenuItem("Aspect ratio", playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "Zoom" : "Fit",
                     false, false, () -> buttonAspectRatio.performClick()));
@@ -2104,7 +2302,7 @@ public class PlayerActivity extends Activity {
         row.setNextFocusRightId(row.getId());
 
         final TextView text = new TextView(this);
-        text.setTextColor(0xFF1C1C1E);
+        text.setTextColor(0xEBFFFFFF);
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         text.setTypeface(ResourcesCompat.getFont(this, R.font.outfit_medium));
         text.setSingleLine(true);
@@ -2113,7 +2311,7 @@ public class PlayerActivity extends Activity {
 
         final TextView best = new TextView(this);
         best.setText("BEST");
-        best.setTextColor(0xFF0A7AFF);
+        best.setTextColor(0xFF64A8FF);
         best.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         best.setLetterSpacing(0.08f);
         best.setTypeface(ResourcesCompat.getFont(this, R.font.outfit_semibold));
@@ -2123,7 +2321,7 @@ public class PlayerActivity extends Activity {
 
         final TextView check = new TextView(this);
         check.setText("✓");
-        check.setTextColor(0xFF1C1C1E);
+        check.setTextColor(0xEBFFFFFF);
         check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         final LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         checkParams.setMarginStart(Utils.dpToPx(14));
@@ -2149,7 +2347,7 @@ public class PlayerActivity extends Activity {
             if (item.detail != null) {
                 final int start = text.length();
                 text.append("   ").append(item.detail);
-                text.setSpan(new ForegroundColorSpan(0xFF6E6E73), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                text.setSpan(new ForegroundColorSpan(0x8CFFFFFF), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 text.setSpan(new RelativeSizeSpan(0.85f), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             ((TextView) row.getChildAt(0)).setText(text);
@@ -2186,6 +2384,8 @@ public class PlayerActivity extends Activity {
         }
         if (popoverInfo.getVisibility() == View.VISIBLE) {
             updatePopoverInfo();
+        } else if (popoverAbout.getVisibility() == View.VISIBLE) {
+            updatePopoverAbout();
         } else if (popoverAnchor == iconAudio || popoverAnchor == iconSubtitles) {
             bindMenu(buildMenuItems(popoverAnchor));
         }
@@ -2293,7 +2493,7 @@ public class PlayerActivity extends Activity {
 
     private static CharSequence infoColumn(String header, List<String> lines) {
         final SpannableStringBuilder text = new SpannableStringBuilder(header);
-        text.setSpan(new ForegroundColorSpan(0xFF8A8A8E), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new ForegroundColorSpan(0x8CFFFFFF), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.setSpan(new RelativeSizeSpan(0.78f), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.append("\n").append(TextUtils.join("\n", lines));
         return text;
