@@ -65,9 +65,7 @@ public class BestAudioTrackSelector extends DefaultTrackSelector {
         return Pair.create(new ExoTrackSelection.Definition(group, position[2]), position[0]);
     }
 
-    // The best playable audio format among the current tracks, or null when there is no audio.
-    @Nullable
-    public static Format findBest(Tracks tracks, List<String> preferredLanguages) {
+    private static List<Format> playableAudio(Tracks tracks) {
         final List<Format> formats = new ArrayList<>();
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() != C.TRACK_TYPE_AUDIO) {
@@ -79,18 +77,79 @@ public class BestAudioTrackSelector extends DefaultTrackSelector {
                 }
             }
         }
+        return formats;
+    }
+
+    // The track auto-pick would choose among the current tracks, or null when there is no audio
+    @Nullable
+    public static Format findBest(Tracks tracks, List<String> preferredLanguages) {
+        final List<Format> formats = playableAudio(tracks);
         final int best = bestIndex(formats, preferredLanguages);
         return best == C.INDEX_UNSET ? null : formats.get(best);
     }
 
-    // Tracks in a preferred (or untagged) language win; if none are, every language is considered.
+    // The best-sounding playable track in the same language as the given one; another language is never "better"
+    @Nullable
+    public static Format findBestInLanguage(Tracks tracks, Format reference) {
+        Format best = null;
+        for (Format format : playableAudio(tracks)) {
+            if (isExcluded(format) || !sameLanguage(format, reference)) {
+                continue;
+            }
+            if (best == null || qualityScore(format) > qualityScore(best)) {
+                best = format;
+            }
+        }
+        return best;
+    }
+
+    // Worth a BEST tag: the top track of its language while that language also has a lesser track
+    public static boolean isBestOfSeveral(Tracks tracks, Format format) {
+        if (isExcluded(format) || !format.equals(findBestInLanguage(tracks, format))) {
+            return false;
+        }
+        for (Format other : playableAudio(tracks)) {
+            if (other != format && !other.equals(format) && sameLanguage(other, format) && qualityScore(other) < qualityScore(format)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A same-language track that sounds better than the one playing, or null
+    @Nullable
+    public static Format findBetterThan(Tracks tracks, Format current) {
+        final Format best = findBestInLanguage(tracks, current);
+        return best != null && qualityScore(best) > qualityScore(current) ? best : null;
+    }
+
+    public static boolean sameLanguage(Format a, Format b) {
+        final String languageA = normalizeUndeterminedLanguageToNull(a.language);
+        final String languageB = normalizeUndeterminedLanguageToNull(b.language);
+        if (languageA == null || languageB == null) {
+            return languageA == null && languageB == null;
+        }
+        return getFormatLanguageScore(a, languageB, false) > 0;
+    }
+
+    // Language first, then sound: a preferred language, else the language the file flags as default,
+    // else any. Within that language the best-sounding track wins.
     private static int bestIndex(List<Format> formats, List<String> preferredLanguages) {
-        for (boolean filterLanguage : new boolean[] {true, false}) {
+        Format defaultTrack = null;
+        for (Format format : formats) {
+            if (!isExcluded(format) && (format.selectionFlags & C.SELECTION_FLAG_DEFAULT) != 0) {
+                defaultTrack = format;
+                break;
+            }
+        }
+        for (int pass = 0; pass < 3; pass++) {
             int best = C.INDEX_UNSET;
             int bestScore = Integer.MIN_VALUE;
             for (int i = 0; i < formats.size(); i++) {
                 final Format format = formats.get(i);
-                if (isExcluded(format) || (filterLanguage && !isLanguageAllowed(format, preferredLanguages))) {
+                if (isExcluded(format)
+                        || (pass == 0 && !isLanguageAllowed(format, preferredLanguages))
+                        || (pass == 1 && (defaultTrack == null || !sameLanguage(format, defaultTrack)))) {
                     continue;
                 }
                 final int score = score(format);
@@ -163,11 +222,16 @@ public class BestAudioTrackSelector extends DefaultTrackSelector {
         }
     }
 
-    // Object audio, then codec, then channels; the default flag only breaks ties.
-    private static int score(Format format) {
+    // How good a track sounds: object audio, then codec, then channels
+    public static int qualityScore(Format format) {
         final int channels = Math.min(Math.max(format.channelCount, 0), 99);
+        return (isObjectAudio(format) ? 100_000 : 0) + codecRank(format) * 1_000 + channels * 10;
+    }
+
+    // The default flag only breaks ties
+    private static int score(Format format) {
         final int isDefault = (format.selectionFlags & C.SELECTION_FLAG_DEFAULT) != 0 ? 1 : 0;
-        return (isObjectAudio(format) ? 100_000 : 0) + codecRank(format) * 1_000 + channels * 10 + isDefault;
+        return qualityScore(format) + isDefault;
     }
 
     public static String describeAudio(Format format) {

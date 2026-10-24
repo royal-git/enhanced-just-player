@@ -2028,8 +2028,6 @@ public class PlayerActivity extends Activity {
 
         final int trackType = anchor == iconAudio ? C.TRACK_TYPE_AUDIO : C.TRACK_TYPE_TEXT;
         final Tracks tracks = player.getCurrentTracks();
-        final Format best = trackType == C.TRACK_TYPE_AUDIO
-                ? BestAudioTrackSelector.findBest(tracks, trackSelector.getParameters().preferredAudioLanguages) : null;
         if (trackType == C.TRACK_TYPE_TEXT) {
             items.add(new MenuItem("Off", null, !tracks.isTypeSelected(C.TRACK_TYPE_TEXT), false,
                     () -> player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
@@ -2069,7 +2067,7 @@ public class PlayerActivity extends Activity {
                 final int index = i;
                 items.add(new MenuItem(BestAudioTrackSelector.languageName(format),
                         details.isEmpty() ? null : TextUtils.join(" · ", details),
-                        group.isTrackSelected(i), format.equals(best),
+                        group.isTrackSelected(i), trackType == C.TRACK_TYPE_AUDIO && BestAudioTrackSelector.isBestOfSeveral(tracks, format),
                         supported ? () -> player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                                 .setTrackTypeDisabled(trackType, false)
                                 .setOverrideForType(new TrackSelectionOverride(trackGroup, index))
@@ -2238,7 +2236,7 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
-        final Format bestAudio = BestAudioTrackSelector.findBest(tracks, trackSelector.getParameters().preferredAudioLanguages);
+        final Format betterAudio = audio != null ? BestAudioTrackSelector.findBetterThan(tracks, audio) : null;
         final List<String> audioLines = new ArrayList<>();
         if (audio != null) {
             audioLines.add(BestAudioTrackSelector.describeAudio(audio));
@@ -2248,10 +2246,10 @@ public class PlayerActivity extends Activity {
             }
             details.add("track " + audioTrackNumber + " of " + audioTrackCount);
             audioLines.add(TextUtils.join(" · ", details));
-            if (bestAudio != null && !audio.equals(bestAudio)) {
-                audioLines.add("⚠ Better: " + BestAudioTrackSelector.describeCodec(bestAudio) + " · " + BestAudioTrackSelector.languageName(bestAudio));
+            if (betterAudio != null) {
+                audioLines.add("⚠ Better: " + BestAudioTrackSelector.describeCodec(betterAudio));
             } else {
-                audioLines.add("✓ Best track");
+                audioLines.add("✓ Best for " + BestAudioTrackSelector.languageName(audio));
             }
         } else {
             audioLines.add(audioTrackCount > 0 ? "Audio is off" : "No audio");
@@ -2296,12 +2294,13 @@ public class PlayerActivity extends Activity {
         final Format video = selectedFormat(C.TRACK_TYPE_VIDEO);
         final Format audio = selectedFormat(C.TRACK_TYPE_AUDIO);
         updateBadges(video, audio);
-        final Format bestAudio = BestAudioTrackSelector.findBest(player.getCurrentTracks(), trackSelector.getParameters().preferredAudioLanguages);
-        // Silent when the best audio is playing; only a problem is worth a word
+        // Silent when the best audio for the chosen language is playing; only a problem is worth a word.
+        // A different language is a choice, not a better track.
+        final Tracks tracks = player.getCurrentTracks();
         String warning = null;
-        if (audio == null && bestAudio != null) {
+        if (audio == null && BestAudioTrackSelector.findBest(tracks, trackSelector.getParameters().preferredAudioLanguages) != null) {
             warning = "⚠ Audio is off";
-        } else if (audio != null && bestAudio != null && !audio.equals(bestAudio)) {
+        } else if (audio != null && BestAudioTrackSelector.findBetterThan(tracks, audio) != null) {
             warning = "⚠ Better audio available";
         }
         summaryStatus.setText(warning);
