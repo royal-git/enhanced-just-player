@@ -36,6 +36,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcelable;
+import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -166,6 +167,8 @@ public class PlayerActivity extends Activity {
     // seconds just as playback starts, and the controls should still be there once the picture is
     private static final int CONTROLLER_TIMEOUT_START = 10_000;
     private boolean startTimeoutPending;
+    // Until this uptime the controls stay up during playback, whatever else asks for the usual timeout
+    private static long startHoldUntilMs;
     private static final String ACTION_MEDIA_CONTROL = "media_control";
     private static final String EXTRA_CONTROL_TYPE = "control_type";
     private static final int REQUEST_PLAY = 1;
@@ -423,7 +426,7 @@ public class PlayerActivity extends Activity {
                 isScrubbing = false;
                 if (restorePlayState) {
                     restorePlayState = false;
-                    playerView.setControllerShowTimeoutMs(PlayerActivity.CONTROLLER_TIMEOUT);
+                    playerView.setControllerShowTimeoutMs(playingTimeoutMs());
                     if (player != null) {
                         player.setPlayWhenReady(true);
                     }
@@ -756,7 +759,7 @@ public class PlayerActivity extends Activity {
                     if (player == null || !player.isPlaying()) {
                         playerView.setControllerShowTimeoutMs(-1);
                     } else {
-                        playerView.setControllerShowTimeoutMs(PlayerActivity.CONTROLLER_TIMEOUT);
+                        playerView.setControllerShowTimeoutMs(playingTimeoutMs());
                     }
                 }
 
@@ -1512,7 +1515,7 @@ public class PlayerActivity extends Activity {
         if (restorePlayState) {
             restorePlayState = false;
             playerView.showController();
-            playerView.setControllerShowTimeoutMs(PlayerActivity.CONTROLLER_TIMEOUT);
+            playerView.setControllerShowTimeoutMs(playingTimeoutMs());
             player.setPlayWhenReady(true);
         }
     }
@@ -1595,15 +1598,15 @@ public class PlayerActivity extends Activity {
                 if (isPlaying && startTimeoutPending) {
                     startTimeoutPending = false;
                     shortControllerTimeout = false;
-                    playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT_START);
-                    restoreControllerTimeout = true;
+                    startHoldUntilMs = SystemClock.uptimeMillis() + CONTROLLER_TIMEOUT_START;
+                    playerView.setControllerShowTimeoutMs(playingTimeoutMs());
                 } else if (isPlaying) {
                     if (shortControllerTimeout) {
                         playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT / 3);
                         shortControllerTimeout = false;
                         restoreControllerTimeout = true;
                     } else {
-                        playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT);
+                        playerView.setControllerShowTimeoutMs(playingTimeoutMs());
                     }
                 } else {
                     playerView.setControllerShowTimeoutMs(-1);
@@ -1960,15 +1963,11 @@ public class PlayerActivity extends Activity {
         final String show = mediaMeta != null && !mediaMeta.name.isEmpty() ? mediaMeta.name : mediaIdentity.name;
         final String episodeName = mediaMeta != null && mediaMeta.episode != null && mediaMeta.episode.name != null
                 ? toTitleCase(mediaMeta.episode.name) : null;
-        // As tvOS does: for an episode the episode name is the title, with the show and number above it
-        if (mediaIdentity.isEpisode() && episodeName != null) {
-            titleView.setText(episodeName);
-            setEpisodeText(show + " · S" + mediaIdentity.season + " E" + mediaIdentity.episode);
-        } else if (mediaIdentity.isEpisode()) {
-            titleView.setText(show);
-            setEpisodeText("S" + mediaIdentity.season + " · E" + mediaIdentity.episode);
+        // The show is the title; the episode number and name sit beside it
+        titleView.setText(show);
+        if (mediaIdentity.isEpisode()) {
+            setEpisodeText("S" + mediaIdentity.season + " · E" + mediaIdentity.episode + (episodeName != null ? "  " + episodeName : ""));
         } else {
-            titleView.setText(show);
             setEpisodeText("");
         }
         titleView.setVisibility(View.VISIBLE);
@@ -1981,10 +1980,9 @@ public class PlayerActivity extends Activity {
         updateMetaRowVisibility();
     }
 
-    // The line above the title shows only when it has an episode, a badge or a warning to show
+    // The line above the title shows only when it has a badge or a warning to show
     private void updateMetaRowVisibility() {
-        final boolean hasContent = episodeText.getVisibility() == View.VISIBLE || badgeRow.getChildCount() > 0
-                || summaryStatus.getVisibility() == View.VISIBLE;
+        final boolean hasContent = badgeRow.getChildCount() > 0 || summaryStatus.getVisibility() == View.VISIBLE;
         metaRow.setVisibility(hasContent ? View.VISIBLE : View.GONE);
     }
 
@@ -2116,9 +2114,14 @@ public class PlayerActivity extends Activity {
     private void showControllerForStart() {
         startTimeoutPending = false;
         shortControllerTimeout = false;
-        playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT_START);
-        restoreControllerTimeout = true;
+        startHoldUntilMs = SystemClock.uptimeMillis() + CONTROLLER_TIMEOUT_START;
+        playerView.setControllerShowTimeoutMs(playingTimeoutMs());
         playerView.showController();
+    }
+
+    // The usual timeout, or longer while the start-of-video hold lasts
+    static int playingTimeoutMs() {
+        return (int) Math.max(CONTROLLER_TIMEOUT, startHoldUntilMs - SystemClock.uptimeMillis());
     }
 
     // "Ends at 22:41   -54:22": the clock time playback finishes, at the current speed, then the time left
@@ -2286,7 +2289,7 @@ public class PlayerActivity extends Activity {
         if (hold) {
             playerView.setControllerShowTimeoutMs(-1);
         } else if (player != null && player.isPlaying()) {
-            playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT);
+            playerView.setControllerShowTimeoutMs(playingTimeoutMs());
         }
     }
 
@@ -2988,7 +2991,7 @@ public class PlayerActivity extends Activity {
     void resetHideCallbacks() {
         if (haveMedia && player != null && player.isPlaying()) {
             // Keep controller UI visible - alternative to resetHideCallbacks()
-            playerView.setControllerShowTimeoutMs(PlayerActivity.CONTROLLER_TIMEOUT);
+            playerView.setControllerShowTimeoutMs(playingTimeoutMs());
         }
     }
 

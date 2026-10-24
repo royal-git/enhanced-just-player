@@ -107,7 +107,7 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
         if (PlayerActivity.restoreControllerTimeout) {
-            setControllerShowTimeoutMs(PlayerActivity.CONTROLLER_TIMEOUT);
+            setControllerShowTimeoutMs(PlayerActivity.playingTimeoutMs());
             PlayerActivity.restoreControllerTimeout = false;
         }
 

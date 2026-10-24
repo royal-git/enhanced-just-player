@@ -103,8 +103,7 @@
 
     </LinearLayout>
 
-    <!-- The small line above the title, as tvOS has it: the show and episode number for series, then the
-         format badges and any audio warning. Hidden when it has nothing to say. -->
+    <!-- The small line above the title: the format badges and any audio warning. Hidden when empty. -->
     <LinearLayout android:id="@+id/meta_row"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -112,17 +111,6 @@
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:visibility="gone">
-
-      <TextView android:id="@+id/episode_text"
-          android:layout_width="wrap_content"
-          android:layout_height="wrap_content"
-          android:layout_marginEnd="14dp"
-          android:fontFamily="@font/outfit_medium"
-          android:includeFontPadding="false"
-          android:maxLines="1"
-          android:textColor="#B3FFFFFF"
-          android:textSize="16sp"
-          android:visibility="gone" />
 
       <LinearLayout android:id="@+id/badge_row"
           android:layout_width="wrap_content"
@@ -133,7 +121,7 @@
       <TextView android:id="@+id/summary_status"
           android:layout_width="wrap_content"
           android:layout_height="wrap_content"
-          android:layout_marginStart="6dp"
+          android:layout_marginStart="4dp"
           android:fontFamily="@font/outfit_medium"
           android:textColor="#FFFFD60A"
           android:textSize="14sp"
@@ -141,15 +129,15 @@
 
     </LinearLayout>
 
-    <!-- The title, then the icons on the right; a long title truncates before the icons -->
+    <!-- The title with the episode beside it on the same baseline, icons on the right. Title and episode form
+         a packed chain; a long title truncates first. -->
     <androidx.constraintlayout.widget.ConstraintLayout android:id="@+id/title_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
       <TextView android:id="@+id/title_text"
-          android:layout_width="0dp"
+          android:layout_width="wrap_content"
           android:layout_height="wrap_content"
-          android:layout_marginEnd="24dp"
           android:fontFamily="@font/outfit_semibold"
           android:textColor="#FFFFFFFF"
           android:textSize="28sp"
@@ -157,10 +145,30 @@
           android:ellipsize="end"
           android:textDirection="locale"
           android:visibility="gone"
+          app:layout_constrainedWidth="true"
+          app:layout_constraintHorizontal_bias="0"
+          app:layout_constraintHorizontal_chainStyle="packed"
           app:layout_constraintStart_toStartOf="parent"
-          app:layout_constraintEnd_toStartOf="@id/icon_row"
+          app:layout_constraintEnd_toStartOf="@id/episode_text"
           app:layout_constraintTop_toTopOf="parent"
           app:layout_constraintBottom_toBottomOf="parent" />
+
+      <TextView android:id="@+id/episode_text"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_marginStart="14dp"
+          android:layout_marginEnd="24dp"
+          android:fontFamily="@font/outfit_medium"
+          android:maxLines="1"
+          android:ellipsize="end"
+          android:textColor="#B3FFFFFF"
+          android:textSize="17sp"
+          android:visibility="gone"
+          app:layout_constrainedWidth="true"
+          app:layout_goneMarginStart="0dp"
+          app:layout_constraintStart_toEndOf="@id/title_text"
+          app:layout_constraintEnd_toStartOf="@id/icon_row"
+          app:layout_constraintBaseline_toBaselineOf="@id/title_text" />
 
       <LinearLayout android:id="@+id/icon_row"
           android:layout_width="wrap_content"
