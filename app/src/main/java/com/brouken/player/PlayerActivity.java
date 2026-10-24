@@ -192,6 +192,19 @@ public class PlayerActivity extends Activity {
     private TextView summaryStatus;
     private LinearLayout exoTime;
     private TextView timeRemaining;
+    private long lastPositionMs;
+    private long lastDurationMs;
+    private static final long END_TIME_REFRESH_MS = 15_000;
+    // While paused the position stands still but the end time does not; refresh it while the controls show
+    private final Runnable endTimeTicker = new Runnable() {
+        @Override
+        public void run() {
+            if (controllerVisible) {
+                updateTimeRemaining();
+                playerView.postDelayed(this, END_TIME_REFRESH_MS);
+            }
+        }
+    };
     private String videoDecoderName;
     private Integer audioOutputEncoding;
     private ImageButton buttonOpen;
@@ -711,11 +724,9 @@ public class PlayerActivity extends Activity {
             return false;
         });
         timeBar.setProgressListener((position, duration) -> {
-            if (duration > 0) {
-                timeRemaining.setText("-" + Utils.formatMilis(Math.max(duration - position, 0)));
-            } else {
-                timeRemaining.setText("");
-            }
+            lastPositionMs = position;
+            lastDurationMs = duration;
+            updateTimeRemaining();
         });
         // The elapsed time rides under the playhead, stopping short of the remaining time
         timeBar.setPlayheadListener(x -> {
@@ -752,6 +763,9 @@ public class PlayerActivity extends Activity {
                     controlGroup.setTranslationY(0f);
                     controlGroup.setAlpha(0f);
                     controlGroup.animate().alpha(1f).setDuration(180).start();
+                    updateTimeRemaining();
+                    playerView.removeCallbacks(endTimeTicker);
+                    playerView.postDelayed(endTimeTicker, END_TIME_REFRESH_MS);
                 } else {
                     closePopover(false);
                     liftSubtitles(false);
@@ -2070,6 +2084,28 @@ public class PlayerActivity extends Activity {
         if (medium) {
             text.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
+    }
+
+    // "Ends at 22:41   -54:22": the clock time playback finishes, at the current speed, then the time left
+    private void updateTimeRemaining() {
+        if (timeRemaining == null) {
+            return;
+        }
+        if (lastDurationMs <= 0 || player == null || player.isCurrentMediaItemLive()) {
+            timeRemaining.setText("");
+            return;
+        }
+        final long remainingMs = Math.max(lastDurationMs - lastPositionMs, 0);
+        final float speed = player.getPlaybackParameters().speed;
+        final long endsAt = System.currentTimeMillis() + (long) (remainingMs / (speed > 0 ? speed : 1f));
+        final SpannableStringBuilder text = new SpannableStringBuilder();
+        if (remainingMs > 0) {
+            text.append("Ends at ").append(android.text.format.DateFormat.getTimeFormat(this).format(new java.util.Date(endsAt)));
+            text.setSpan(new ForegroundColorSpan(0x8CFFFFFF), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            text.append("     ");
+        }
+        text.append("-").append(Utils.formatMilis(remainingMs));
+        timeRemaining.setText(text);
     }
 
     private static boolean isDescendant(View parent, View view) {
