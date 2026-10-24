@@ -58,6 +58,7 @@
     <string name="pref_subtitle_style_bold">Bold style</string>
     <string name="pref_subtitle_style_bold_on">Use bold typeface as regular</string>
     <string name="pref_subtitle_style_bold_off">Use default regular typeface</string>
+    <string name="tv_about" translatable="false">About</string>
     <string name="tv_subtitles" translatable="false">Subtitles</string>
     <string name="tv_audio" translatable="false">Audio</string>
     <string name="tv_more" translatable="false">More</string>

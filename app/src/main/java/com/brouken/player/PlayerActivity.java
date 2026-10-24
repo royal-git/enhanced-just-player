@@ -176,6 +176,7 @@ public class PlayerActivity extends Activity {
     private TextView popoverHeader;
     private LinearLayout popoverList;
     private LinearLayout iconRow;
+    private View iconAbout;
     private View iconSubtitles;
     private View iconAudio;
     private View iconMore;
@@ -187,6 +188,7 @@ public class PlayerActivity extends Activity {
     @Nullable private Bitmap mediaPoster;
     private static final ExecutorService background = Executors.newSingleThreadExecutor();
     private LinearLayout badgeRow;
+    private TextView episodeText;
     private TextView summaryStatus;
     private LinearLayout exoTime;
     private TextView timeRemaining;
@@ -487,6 +489,7 @@ public class PlayerActivity extends Activity {
         popoverHeader = playerView.findViewById(R.id.popover_header);
         popoverList = playerView.findViewById(R.id.popover_list);
         iconRow = playerView.findViewById(R.id.icon_row);
+        iconAbout = playerView.findViewById(R.id.icon_about);
         iconSubtitles = playerView.findViewById(R.id.icon_subtitles);
         iconAudio = playerView.findViewById(R.id.icon_audio);
         iconMore = playerView.findViewById(R.id.icon_more);
@@ -501,6 +504,7 @@ public class PlayerActivity extends Activity {
         });
         aboutPoster.setClipToOutline(true);
         badgeRow = playerView.findViewById(R.id.badge_row);
+        episodeText = playerView.findViewById(R.id.episode_text);
         summaryStatus = playerView.findViewById(R.id.summary_status);
         exoTime = playerView.findViewById(R.id.exo_time);
         timeRemaining = playerView.findViewById(R.id.time_remaining);
@@ -509,6 +513,7 @@ public class PlayerActivity extends Activity {
         playerView.setControllerAnimationEnabled(false);
 
         // An icon opens its menu on OK, anchored above it; moving out of the menu closes it
+        iconAbout.setOnClickListener(view -> openPopover(view));
         iconSubtitles.setOnClickListener(view -> openPopover(view));
         iconAudio.setOnClickListener(view -> openPopover(view));
         iconMore.setOnClickListener(view -> openPopover(view));
@@ -1056,7 +1061,7 @@ public class PlayerActivity extends Activity {
         // Back closes an open menu first, returning to its icon
         if (popover != null && popover.getVisibility() == View.VISIBLE && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
-                if (isDetailShown()) {
+                if (isDetailShown() && popoverAnchor == iconMore) {
                     openPopover(iconMore);
                 } else {
                     closePopover(true);
@@ -1920,20 +1925,29 @@ public class PlayerActivity extends Activity {
             final String mediaTitle = apiTitle != null ? apiTitle : Utils.getFileName(this, mPrefs.mediaUri);
             titleView.setText(mediaTitle);
             titleView.setVisibility(mediaTitle != null && mediaTitle.trim().length() > 2 ? View.VISIBLE : View.GONE);
+            iconAbout.setVisibility(View.GONE);
+            setEpisodeText("");
             return;
         }
-        final SpannableStringBuilder title = new SpannableStringBuilder(mediaMeta != null && !mediaMeta.name.isEmpty() ? mediaMeta.name : mediaIdentity.name);
-        if (mediaIdentity.isEpisode()) {
-            final int start = title.length();
-            title.append("   S").append(String.valueOf(mediaIdentity.season)).append(" · E").append(String.valueOf(mediaIdentity.episode));
-            if (mediaMeta != null && mediaMeta.episode != null && mediaMeta.episode.name != null) {
-                title.append("  ").append(toTitleCase(mediaMeta.episode.name));
-            }
-            title.setSpan(new ForegroundColorSpan(0xB3FFFFFF), start, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            title.setSpan(new RelativeSizeSpan(0.62f), start, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-        titleView.setText(title);
+        iconAbout.setVisibility(mediaIdentity.imdbId != null ? View.VISIBLE : View.GONE);
+        titleView.setText(mediaMeta != null && !mediaMeta.name.isEmpty() ? mediaMeta.name : mediaIdentity.name);
         titleView.setVisibility(View.VISIBLE);
+        String episode = "";
+        if (mediaIdentity.isEpisode()) {
+            episode = "S" + mediaIdentity.season + " · E" + mediaIdentity.episode;
+            if (mediaMeta != null && mediaMeta.episode != null && mediaMeta.episode.name != null) {
+                episode += "  " + toTitleCase(mediaMeta.episode.name);
+            }
+        }
+        setEpisodeText(episode);
+    }
+
+    // Empty for films; the gap before the badges only when there is text
+    private void setEpisodeText(String text) {
+        episodeText.setText(text);
+        final LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) episodeText.getLayoutParams();
+        layoutParams.setMarginEnd(text.isEmpty() ? 0 : Utils.dpToPx(14));
+        episodeText.setLayoutParams(layoutParams);
     }
 
     // Some catalogues shout episode names ("FIRST PERIOD"); tone those down
@@ -2093,7 +2107,7 @@ public class PlayerActivity extends Activity {
 
     private void openPopover(View anchor) {
         // Back from a More detail page: refill the list and move focus into it before the details hide
-        if (popover.getVisibility() == View.VISIBLE && isDetailShown()) {
+        if (popover.getVisibility() == View.VISIBLE && isDetailShown() && anchor == iconMore && popoverAnchor == iconMore) {
             popoverHeader.setText("MORE");
             final View target = popoverList.getChildAt(bindMenu(buildMenuItems(anchor)));
             popoverList.setVisibility(View.VISIBLE);
@@ -2112,8 +2126,15 @@ public class PlayerActivity extends Activity {
         }
         popoverAnchor = anchor;
         anchor.setSelected(true);
-        popoverHeader.setText(anchor == iconSubtitles ? "SUBTITLES" : anchor == iconAudio ? "AUDIO" : "MORE");
-        final int focusRow = bindMenu(buildMenuItems(anchor));
+        popoverHeader.setText(anchor == iconAbout ? "ABOUT" : anchor == iconSubtitles ? "SUBTITLES" : anchor == iconAudio ? "AUDIO" : "MORE");
+        // About is a page of its own rather than a list
+        final int focusRow = anchor == iconAbout ? 0 : bindMenu(buildMenuItems(anchor));
+        if (anchor == iconAbout) {
+            updatePopoverAbout();
+            popoverAbout.setNextFocusDownId(R.id.icon_about);
+            popoverAbout.setVisibility(View.VISIBLE);
+            popoverList.setVisibility(View.GONE);
+        }
         // Right-align the menu with its icon
         final LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) popover.getLayoutParams();
         layoutParams.setMarginEnd(iconRow.getWidth() - anchor.getRight());
@@ -2123,7 +2144,7 @@ public class PlayerActivity extends Activity {
         popover.setVisibility(View.VISIBLE);
         popover.animate().alpha(1f).translationY(0f).setDuration(160).start();
         holdControls(true);
-        final View target = popoverList.getChildAt(focusRow);
+        final View target = anchor == iconAbout ? popoverAbout : popoverList.getChildAt(focusRow);
         popover.post(() -> {
             if (target != null && popover.getVisibility() == View.VISIBLE) {
                 target.requestFocus();
@@ -2137,13 +2158,6 @@ public class PlayerActivity extends Activity {
         popoverHeader.setText("INFO");
         updatePopoverInfo();
         showDetail(popoverInfo);
-    }
-
-    // More > About: the title's details from Cinemeta
-    private void showPopoverAbout() {
-        popoverHeader.setText("ABOUT");
-        updatePopoverAbout();
-        showDetail(popoverAbout);
     }
 
     private void showDetail(View detail) {
@@ -2208,20 +2222,6 @@ public class PlayerActivity extends Activity {
     private List<MenuItem> buildMenuItems(View anchor) {
         final List<MenuItem> items = new ArrayList<>();
         if (anchor == iconMore) {
-            if (mediaIdentity != null && mediaIdentity.imdbId != null) {
-                String detail = null;
-                if (mediaMeta != null) {
-                    final List<String> parts = new ArrayList<>();
-                    if (mediaMeta.imdbRating != null) {
-                        parts.add("★ " + mediaMeta.imdbRating);
-                    }
-                    if (mediaMeta.releaseInfo != null) {
-                        parts.add(mediaMeta.releaseInfo);
-                    }
-                    detail = parts.isEmpty() ? null : TextUtils.join(" · ", parts);
-                }
-                items.add(new MenuItem("About", detail, false, false, this::showPopoverAbout, true));
-            }
             items.add(new MenuItem("Info", "video, audio, subtitles", false, false, this::showPopoverInfo, true));
             items.add(new MenuItem("Aspect ratio", playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "Zoom" : "Fit",
                     false, false, () -> buttonAspectRatio.performClick()));
@@ -2561,7 +2561,8 @@ public class PlayerActivity extends Activity {
             view.setLetterSpacing(0.08f);
             view.setTypeface(ResourcesCompat.getFont(this, R.font.outfit_semibold));
             view.setBackgroundResource(R.drawable.tv_badge_background);
-            view.setPadding(Utils.dpToPx(6), Utils.dpToPx(2), Utils.dpToPx(6), Utils.dpToPx(2));
+            view.setIncludeFontPadding(false);
+            view.setPadding(Utils.dpToPx(6), Utils.dpToPx(3), Utils.dpToPx(6), Utils.dpToPx(3));
             final LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             layoutParams.setMarginEnd(Utils.dpToPx(8));
             badgeRow.addView(view, layoutParams);

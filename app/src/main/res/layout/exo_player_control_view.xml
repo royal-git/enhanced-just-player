@@ -103,8 +103,9 @@
 
     </LinearLayout>
 
-    <!-- One line: the title, then the format badges and any audio warning beside it, icons on the right.
-         Title and summary form a packed chain; a long title truncates before the summary does. -->
+    <!-- One line: the title, then the episode, format badges and any audio warning beside it, icons on the
+         right. The summary shares the title's baseline, so the episode text sits on the same line as the title
+         and the badges centre on it. Title and summary form a packed chain; a long title truncates first. -->
     <androidx.constraintlayout.widget.ConstraintLayout android:id="@+id/title_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
@@ -130,15 +131,26 @@
       <LinearLayout android:id="@+id/summary_row"
           android:layout_width="wrap_content"
           android:layout_height="wrap_content"
-          android:layout_marginStart="18dp"
+          android:layout_marginStart="14dp"
           android:layout_marginEnd="18dp"
           android:gravity="center_vertical"
           android:orientation="horizontal"
+          android:baselineAligned="false"
+          android:baselineAlignedChildIndex="0"
           app:layout_goneMarginStart="0dp"
           app:layout_constraintStart_toEndOf="@id/title_text"
           app:layout_constraintEnd_toStartOf="@id/icon_row"
-          app:layout_constraintTop_toTopOf="parent"
-          app:layout_constraintBottom_toBottomOf="parent">
+          app:layout_constraintBaseline_toBaselineOf="@id/title_text">
+
+        <!-- Always present (empty for films) so the row has a baseline to share with the title -->
+        <TextView android:id="@+id/episode_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/outfit_medium"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="#B3FFFFFF"
+            android:textSize="17sp" />
 
         <LinearLayout android:id="@+id/badge_row"
             android:layout_width="wrap_content"
@@ -165,10 +177,19 @@
           app:layout_constraintTop_toTopOf="parent"
           app:layout_constraintBottom_toBottomOf="parent">
 
+        <!-- Shown only when the stream says what is playing -->
+        <ImageButton android:id="@+id/icon_about"
+            style="@style/TvIconButton"
+            android:contentDescription="@string/tv_about"
+            android:nextFocusLeft="@id/icon_about"
+            android:nextFocusUp="@id/icon_about"
+            android:nextFocusDown="@id/exo_progress"
+            android:src="@drawable/ic_tv_about"
+            android:visibility="gone" />
+
         <ImageButton android:id="@+id/icon_subtitles"
             style="@style/TvIconButton"
             android:contentDescription="@string/tv_subtitles"
-            android:nextFocusLeft="@id/icon_subtitles"
             android:nextFocusUp="@id/icon_subtitles"
             android:nextFocusDown="@id/exo_progress"
             android:src="@drawable/ic_tv_subtitles" />
