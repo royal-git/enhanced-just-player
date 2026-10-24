@@ -1,33 +1,51 @@
 # Enhanced Just Player
 
-A fork of [Just (Video) Player](https://github.com/moneytoo/Player) by [moneytoo](https://github.com/moneytoo), tuned for Android TV boxes such as the NVIDIA SHIELD. It plays the best audio track by itself and has a tvOS-style remote-friendly interface. Everything else is Just Player.
+A fork of [Just (Video) Player](https://github.com/moneytoo/Player) by [moneytoo](https://github.com/moneytoo), tuned for Android TV boxes such as the NVIDIA SHIELD and for use as [Stremio](https://www.stremio.com)'s external player. It plays the best audio track by itself, knows what it is playing, and has a remote-friendly interface in the style of tvOS. Everything else is Just Player.
 
 <img src="docs/tv/1-controls.jpg" width="806">
 
-<img src="docs/tv/2-audio.jpg" width="400"> <img src="docs/tv/3-info.jpg" width="400">
+<img src="docs/tv/2-audio.jpg" width="400"> <img src="docs/tv/3-about.jpg" width="400">
+<img src="docs/tv/5-chapters.jpg" width="400"> <img src="docs/tv/6-info.jpg" width="400">
+
+<sub>Screenshots from the Android TV emulator with a test pattern; the About panel shows [Big Buck Bunny](https://peach.blender.org) (CC BY, Blender Foundation).</sub>
 
 ## What's different
 
-**The best audio track, automatically.** Players normally start the track the file marks as default, which is often a stereo or audio description track. Enhanced Just Player picks, among the tracks in your language:
+### Sound and picture
 
-1. object audio first: Dolby Atmos (TrueHD or DD+) and DTS:X,
-2. then lossless: TrueHD, DTS-HD MA, FLAC, PCM,
-3. then the most channels.
+- **The best audio track, automatically.** Players normally start the track a file marks as default, often a stereo or audio description track. Among the tracks in your language this player picks object audio first (Dolby Atmos, DTS:X), then lossless (TrueHD, DTS-HD MA), then the most channels. Commentary and audio description are never picked on their own, and a different language is never "better", only a choice. A track you choose yourself always wins.
+- **Dolby Atmos detection.** Matroska says "E-AC3" or "TrueHD" without saying whether it carries Atmos; the player reads the first passthrough frames (E-AC3 JOC, TrueHD's 16-channel substream) the way a receiver does, so Atmos shows up in the badges and menus.
+- **One blackout when a film starts and one when it ends.** With frame-rate matching on, the rate is read from the Matroska header with a single small request and the TV switches before playback begins, instead of switching after video and audio have started and making the TV and soundbar resync. On exit the mode request is released before the window closes.
 
-Commentary and audio description tracks are never picked on their own. A track you choose yourself always wins.
+### Knows what it is playing
 
-**A TV interface in the style of tvOS.**
+Stremio hands an external player only a link. For streams from the [Comet](https://github.com/g0ldyy/comet) addon the link names the title, its IMDb id and the episode, and the player uses that:
 
-- One line at the bottom: the title, format badges (4K, Dolby Vision, Dolby Atmos) and a warning only when a better audio track exists. Subtitles, Audio and More sit on the right.
-- A thin timeline with the elapsed time under the playhead and the time remaining at the end. OK plays and pauses, Left and Right seek.
-- Menus open above their button. Audio lists every track with its codec, marks the best one and ticks the one playing; More holds Info (video, audio and subtitle details, including passthrough and the display refresh rate), aspect ratio, picture-in-picture, open file and settings.
-- Back steps out one level at a time. The controls stay up while a menu is open, and subtitles move above the controls while they are shown.
+- **Title and episode** in the controls, e.g. "Breaking Bad  S1 · E1  Pilot".
+- **About**: poster, year, runtime, IMDb rating, genres, synopsis, cast and director from [Cinemeta](https://v3-cinemeta.strem.io), Stremio's own metadata service. Only the IMDb id is sent.
+- **Remembered choices.** Subtitle and audio choices are remembered per show, and your last subtitle choice applies to anything new, so subtitles stop switching themselves off. Kept on the device only.
+- **Skip intro, recap and credits.** From the file's chapters when they are named for it, otherwise from [TheIntroDB](https://theintrodb.org), a crowd-sourced database looked up by IMDb id, season, episode and duration. The online lookup can be turned off in Player settings.
+
+  <img src="docs/tv/4-skip.jpg" width="400">
+
+### The interface, after tvOS
+
+- One line at the bottom: the title and episode, format badges above it (4K, Dolby Vision · Atmos), and a warning only when a better audio track exists in your language. About, Subtitles, Audio and More sit on the right.
+- A thin timeline split at chapter starts, the elapsed time under the playhead, and "Ends at 22:41" with the time left at the end. OK plays and pauses, Left and Right seek.
+- Menus open above their button and keep the controls up while open. More holds Info (video, audio, passthrough, display refresh rate and subtitles), Chapters, aspect ratio, picture-in-picture, open file and settings. Back steps out one level at a time; Up from the top row closes the controls.
+- The controls stay up for 7 seconds when a video starts, so the title is readable once the TV has switched modes. Dark glass menus that do not glare when the TV is in HDR.
 
 It installs next to Just Player as its own app (`io.github.royalgit.enhancedjustplayer`).
 
 ## Using it with Stremio
 
 In Stremio, set Settings → Playback → Default player to **External**, then choose **Enhanced Just Player** and **Always** when Android asks. Stremio keeps your watch progress: the player hands the position back when you exit. In the player, turn on More → Player settings → **Auto frame rate matching** so 24p films play at 24 Hz.
+
+Title, About, remembered choices and skip timestamps need a link that identifies the title, which Comet's do. With other addons the player still works as a plain player.
+
+## Privacy
+
+The player itself sends nothing anywhere except two lookups for streams that identify themselves: the IMDb id to Cinemeta for About, and the IMDb id, season, episode and duration to TheIntroDB for skip timestamps (switchable off). Stream links, which can carry debrid keys, are never logged or sent.
 
 ## Building
 
@@ -47,6 +65,7 @@ Leave out `-PabiFilter` for a universal APK.
 - [Just Player](https://github.com/moneytoo/Player) is released into the public domain ([Unlicense](LICENSE)); the changes in this fork are too.
 - [Outfit](https://fonts.google.com/specimen/Outfit) font: SIL Open Font License 1.1, see [FONT-LICENSE-OFL.txt](FONT-LICENSE-OFL.txt).
 - Icons: [Material Symbols Rounded](https://github.com/google/material-design-icons), Apache License 2.0.
+- Title details from [Cinemeta](https://v3-cinemeta.strem.io); skip timestamps from [TheIntroDB](https://theintrodb.org) contributors.
 
 ---
 
