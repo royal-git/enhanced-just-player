@@ -161,7 +161,11 @@ public class PlayerActivity extends Activity {
     private static final int REQUEST_CHOOSER_SUBTITLE_MEDIASTORE = 21;
     private static final int REQUEST_SETTINGS = 100;
     private static final int REQUEST_SYSTEM_CAPTIONS = 200;
-    public static final int CONTROLLER_TIMEOUT = 3500;
+    public static final int CONTROLLER_TIMEOUT = 5000;
+    // A new video gets longer: on a TV, switching to HDR or the film's frame rate blanks the screen for a couple of
+    // seconds just as playback starts, and the controls should still be there once the picture is
+    private static final int CONTROLLER_TIMEOUT_START = 10_000;
+    private boolean startTimeoutPending;
     private static final String ACTION_MEDIA_CONTROL = "media_control";
     private static final String EXTRA_CONTROL_TYPE = "control_type";
     private static final int REQUEST_PLAY = 1;
@@ -189,6 +193,7 @@ public class PlayerActivity extends Activity {
     private static final ExecutorService background = Executors.newSingleThreadExecutor();
     private LinearLayout badgeRow;
     private TextView episodeText;
+    private View metaRow;
     private TextView summaryStatus;
     private LinearLayout exoTime;
     private TextView timeRemaining;
@@ -518,6 +523,7 @@ public class PlayerActivity extends Activity {
         aboutPoster.setClipToOutline(true);
         badgeRow = playerView.findViewById(R.id.badge_row);
         episodeText = playerView.findViewById(R.id.episode_text);
+        metaRow = playerView.findViewById(R.id.meta_row);
         summaryStatus = playerView.findViewById(R.id.summary_status);
         exoTime = playerView.findViewById(R.id.exo_time);
         timeRemaining = playerView.findViewById(R.id.time_remaining);
@@ -730,7 +736,8 @@ public class PlayerActivity extends Activity {
         });
         // The elapsed time rides under the playhead, stopping short of the remaining time
         timeBar.setPlayheadListener(x -> {
-            final float maxX = ((View) exoTime.getParent()).getWidth() - timeRemaining.getWidth() - exoTime.getWidth() - Utils.dpToPx(16);
+            final View timeRight = (View) timeRemaining.getParent();
+            final float maxX = ((View) exoTime.getParent()).getWidth() - timeRight.getWidth() - exoTime.getWidth() - Utils.dpToPx(16);
             exoTime.setTranslationX(Math.max(0, Math.min(x - exoTime.getWidth() / 2f, maxX)));
         });
 
@@ -1455,6 +1462,7 @@ public class PlayerActivity extends Activity {
                 play = true;
             }
 
+            startTimeoutPending = true;
             mediaIdentity = MediaIdentity.fromUri(mPrefs.mediaUri);
             mediaMeta = null;
             mediaPoster = null;
@@ -1584,7 +1592,12 @@ public class PlayerActivity extends Activity {
             }
 
             if (!isScrubbing) {
-                if (isPlaying) {
+                if (isPlaying && startTimeoutPending) {
+                    startTimeoutPending = false;
+                    shortControllerTimeout = false;
+                    playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT_START);
+                    restoreControllerTimeout = true;
+                } else if (isPlaying) {
                     if (shortControllerTimeout) {
                         playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT / 3);
                         shortControllerTimeout = false;
@@ -1681,7 +1694,7 @@ public class PlayerActivity extends Activity {
                                                 player.play();
                                             }
                                             if (playerView != null) {
-                                                playerView.hideController();
+                                                showControllerForStart();
                                             }
                                         }
                                     }
@@ -1698,7 +1711,7 @@ public class PlayerActivity extends Activity {
                         if (play) {
                             play = false;
                             player.play();
-                            playerView.hideController();
+                            showControllerForStart();
                         }
                     }
 
@@ -1944,24 +1957,35 @@ public class PlayerActivity extends Activity {
             return;
         }
         iconAbout.setVisibility(mediaIdentity.imdbId != null ? View.VISIBLE : View.GONE);
-        titleView.setText(mediaMeta != null && !mediaMeta.name.isEmpty() ? mediaMeta.name : mediaIdentity.name);
-        titleView.setVisibility(View.VISIBLE);
-        String episode = "";
-        if (mediaIdentity.isEpisode()) {
-            episode = "S" + mediaIdentity.season + " · E" + mediaIdentity.episode;
-            if (mediaMeta != null && mediaMeta.episode != null && mediaMeta.episode.name != null) {
-                episode += "  " + toTitleCase(mediaMeta.episode.name);
-            }
+        final String show = mediaMeta != null && !mediaMeta.name.isEmpty() ? mediaMeta.name : mediaIdentity.name;
+        final String episodeName = mediaMeta != null && mediaMeta.episode != null && mediaMeta.episode.name != null
+                ? toTitleCase(mediaMeta.episode.name) : null;
+        // As tvOS does: for an episode the episode name is the title, with the show and number above it
+        if (mediaIdentity.isEpisode() && episodeName != null) {
+            titleView.setText(episodeName);
+            setEpisodeText(show + " · S" + mediaIdentity.season + " E" + mediaIdentity.episode);
+        } else if (mediaIdentity.isEpisode()) {
+            titleView.setText(show);
+            setEpisodeText("S" + mediaIdentity.season + " · E" + mediaIdentity.episode);
+        } else {
+            titleView.setText(show);
+            setEpisodeText("");
         }
-        setEpisodeText(episode);
+        titleView.setVisibility(View.VISIBLE);
     }
 
-    // Empty for films; the gap before the badges only when there is text
+    // Empty for films
     private void setEpisodeText(String text) {
         episodeText.setText(text);
-        final LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) episodeText.getLayoutParams();
-        layoutParams.setMarginEnd(text.isEmpty() ? 0 : Utils.dpToPx(14));
-        episodeText.setLayoutParams(layoutParams);
+        episodeText.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+        updateMetaRowVisibility();
+    }
+
+    // The line above the title shows only when it has an episode, a badge or a warning to show
+    private void updateMetaRowVisibility() {
+        final boolean hasContent = episodeText.getVisibility() == View.VISIBLE || badgeRow.getChildCount() > 0
+                || summaryStatus.getVisibility() == View.VISIBLE;
+        metaRow.setVisibility(hasContent ? View.VISIBLE : View.GONE);
     }
 
     // Some catalogues shout episode names ("FIRST PERIOD"); tone those down
@@ -2084,6 +2108,17 @@ public class PlayerActivity extends Activity {
         if (medium) {
             text.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
+    }
+
+    // Autoplay used to hide the controls the moment playback started; on a TV that is exactly when the screen blanks
+    // for the switch to HDR or the film's frame rate. Show them for the start timeout instead, so the title and the
+    // format are readable once the picture appears.
+    private void showControllerForStart() {
+        startTimeoutPending = false;
+        shortControllerTimeout = false;
+        playerView.setControllerShowTimeoutMs(CONTROLLER_TIMEOUT_START);
+        restoreControllerTimeout = true;
+        playerView.showController();
     }
 
     // "Ends at 22:41   -54:22": the clock time playback finishes, at the current speed, then the time left
@@ -2234,7 +2269,7 @@ public class PlayerActivity extends Activity {
             return;
         }
         float fraction = SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f;
-        final View titleRow = playerView.findViewById(R.id.title_row);
+        final View titleRow = metaRow != null && metaRow.getVisibility() == View.VISIBLE ? metaRow : playerView.findViewById(R.id.title_row);
         if (lift && titleRow != null && subtitleView.getHeight() > 0) {
             final int[] rowLocation = new int[2];
             final int[] subtitleLocation = new int[2];
@@ -2554,6 +2589,7 @@ public class PlayerActivity extends Activity {
         }
         summaryStatus.setText(warning);
         summaryStatus.setVisibility(warning == null ? View.GONE : View.VISIBLE);
+        updateMetaRowVisibility();
     }
 
     private void updateBadges(@Nullable Format video, @Nullable Format audio) {

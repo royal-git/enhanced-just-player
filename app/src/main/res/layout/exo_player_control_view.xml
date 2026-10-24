@@ -103,16 +103,53 @@
 
     </LinearLayout>
 
-    <!-- One line: the title, then the episode, format badges and any audio warning beside it, icons on the
-         right. The summary shares the title's baseline, so the episode text sits on the same line as the title
-         and the badges centre on it. Title and summary form a packed chain; a long title truncates first. -->
+    <!-- The small line above the title, as tvOS has it: the show and episode number for series, then the
+         format badges and any audio warning. Hidden when it has nothing to say. -->
+    <LinearLayout android:id="@+id/meta_row"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+      <TextView android:id="@+id/episode_text"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_marginEnd="14dp"
+          android:fontFamily="@font/outfit_medium"
+          android:includeFontPadding="false"
+          android:maxLines="1"
+          android:textColor="#B3FFFFFF"
+          android:textSize="16sp"
+          android:visibility="gone" />
+
+      <LinearLayout android:id="@+id/badge_row"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:orientation="horizontal" />
+
+      <!-- Only shown as a warning: nothing is said when the best audio is playing -->
+      <TextView android:id="@+id/summary_status"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_marginStart="6dp"
+          android:fontFamily="@font/outfit_medium"
+          android:textColor="#FFFFD60A"
+          android:textSize="14sp"
+          android:visibility="gone" />
+
+    </LinearLayout>
+
+    <!-- The title, then the icons on the right; a long title truncates before the icons -->
     <androidx.constraintlayout.widget.ConstraintLayout android:id="@+id/title_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
       <TextView android:id="@+id/title_text"
-          android:layout_width="wrap_content"
+          android:layout_width="0dp"
           android:layout_height="wrap_content"
+          android:layout_marginEnd="24dp"
           android:fontFamily="@font/outfit_semibold"
           android:textColor="#FFFFFFFF"
           android:textSize="28sp"
@@ -120,54 +157,10 @@
           android:ellipsize="end"
           android:textDirection="locale"
           android:visibility="gone"
-          app:layout_constrainedWidth="true"
-          app:layout_constraintHorizontal_bias="0"
-          app:layout_constraintHorizontal_chainStyle="packed"
           app:layout_constraintStart_toStartOf="parent"
-          app:layout_constraintEnd_toStartOf="@id/summary_row"
+          app:layout_constraintEnd_toStartOf="@id/icon_row"
           app:layout_constraintTop_toTopOf="parent"
           app:layout_constraintBottom_toBottomOf="parent" />
-
-      <LinearLayout android:id="@+id/summary_row"
-          android:layout_width="wrap_content"
-          android:layout_height="wrap_content"
-          android:layout_marginStart="14dp"
-          android:layout_marginEnd="18dp"
-          android:gravity="center_vertical"
-          android:orientation="horizontal"
-          android:baselineAligned="false"
-          android:baselineAlignedChildIndex="0"
-          app:layout_goneMarginStart="0dp"
-          app:layout_constraintStart_toEndOf="@id/title_text"
-          app:layout_constraintEnd_toStartOf="@id/icon_row"
-          app:layout_constraintBaseline_toBaselineOf="@id/title_text">
-
-        <!-- Always present (empty for films) so the row has a baseline to share with the title -->
-        <TextView android:id="@+id/episode_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="@font/outfit_medium"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:textColor="#B3FFFFFF"
-            android:textSize="17sp" />
-
-        <LinearLayout android:id="@+id/badge_row"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal" />
-
-        <!-- Only shown as a warning: nothing is said when the best audio is playing -->
-        <TextView android:id="@+id/summary_status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:fontFamily="@font/outfit_medium"
-            android:textColor="#FFFFD60A"
-            android:textSize="14sp"
-            android:visibility="gone" />
-
-      </LinearLayout>
 
       <LinearLayout android:id="@+id/icon_row"
           android:layout_width="wrap_content"
@@ -252,13 +245,23 @@
 
       </LinearLayout>
 
-      <TextView android:id="@+id/time_remaining"
+      <!-- Right end of the row under the timeline: the end time and time left. The elapsed time under the
+           playhead stops short of this group. -->
+      <LinearLayout android:id="@+id/time_right"
           android:layout_width="wrap_content"
           android:layout_height="wrap_content"
-          android:layout_gravity="end"
-          android:fontFamily="@font/outfit_medium"
-          android:textColor="#D9FFFFFF"
-          android:textSize="14sp" />
+          android:layout_gravity="end|center_vertical"
+          android:gravity="center_vertical"
+          android:orientation="horizontal">
+
+        <TextView android:id="@+id/time_remaining"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/outfit_medium"
+            android:textColor="#D9FFFFFF"
+            android:textSize="14sp" />
+
+      </LinearLayout>
 
     </FrameLayout>
 
