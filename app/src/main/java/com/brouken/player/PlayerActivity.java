@@ -54,6 +54,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -200,6 +201,8 @@ public class PlayerActivity extends Activity {
     private boolean moreSubmenu;
     // Rows are being replaced: focus briefly leaves the menu, which must not close it
     private boolean rebindingMenu;
+    // Frame rate read from the Matroska header before preparing; the display already matches it
+    private float headerFrameRate = Format.NO_VALUE;
     private int shownChapter = -1;
     // Skip intro / recap / credits
     private TextView skipButton;
@@ -938,6 +941,17 @@ public class PlayerActivity extends Activity {
             setResult(Activity.RESULT_OK, intent);
         }
 
+        // Drop the frame-rate mode before closing. Otherwise the closing window keeps asking for it during the exit
+        // animation while the app behind already asks for the default: the TV switched 24 -> 60 -> 24 -> 60 Hz,
+        // three blackouts instead of one.
+        if (Build.VERSION.SDK_INT >= 23) {
+            final WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
+            if (layoutParams.preferredDisplayModeId != 0) {
+                layoutParams.preferredDisplayModeId = 0;
+                getWindow().setAttributes(layoutParams);
+            }
+        }
+
         super.finish();
     }
 
@@ -1589,7 +1603,7 @@ public class PlayerActivity extends Activity {
                 refreshPanels();
             }
         });
-        player.prepare();
+        prepareWithFrameRate();
 
         if (restorePlayState) {
             restorePlayState = false;
@@ -1787,7 +1801,8 @@ public class PlayerActivity extends Activity {
                             }
                             displayManager.registerDisplayListener(displayListener, null);
                         }
-                        switched = Utils.switchFrameRate(PlayerActivity.this, mPrefs.mediaUri, play);
+                        // Already switched from the Matroska header before preparing: nothing to measure or wait for
+                        switched = headerFrameRate <= 0 && Utils.switchFrameRate(PlayerActivity.this, mPrefs.mediaUri, play);
                     }
                     if (!switched) {
                         if (displayManager != null) {
@@ -2222,6 +2237,77 @@ public class PlayerActivity extends Activity {
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                 .setOverrideForType(new TrackSelectionOverride(group.getMediaTrackGroup(), match[1]))
                 .build());
+    }
+
+    // With frame-rate matching on, switch the TV before preparing: read the rate from the Matroska header, ask for
+    // the matching mode, wait for the switch and for the HDMI audio link to come back, then prepare. One blackout
+    // while loading, instead of switching after video and audio have started, which tears both down again.
+    // Anything else (not Matroska, no rate in the header, not a stream) prepares at once and keeps the old path.
+    private void prepareWithFrameRate() {
+        headerFrameRate = Format.NO_VALUE;
+        final Uri uri = mPrefs.mediaUri;
+        final String scheme = uri == null || uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (!mPrefs.frameRateMatching || Build.VERSION.SDK_INT < 23 || !scheme.startsWith("http") || !play) {
+            player.prepare();
+            return;
+        }
+        final ExoPlayer target = player;
+        background.execute(() -> {
+            float rate = Format.NO_VALUE;
+            try {
+                rate = MatroskaHeader.readFrameRate(uri);
+            } catch (Exception ignored) {
+            }
+            final float found = rate;
+            runOnUiThread(() -> {
+                if (player != target) {
+                    return;
+                }
+                if (found <= 0) {
+                    player.prepare();
+                    return;
+                }
+                headerFrameRate = Utils.normalizeFrameRate(found);
+                if (!Utils.applyFrameRateMode(this, headerFrameRate)) {
+                    player.prepare();
+                    return;
+                }
+                prepareAfterModeSwitch(target);
+            });
+        });
+    }
+
+    private void prepareAfterModeSwitch(ExoPlayer target) {
+        final DisplayManager manager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+        final boolean[] prepared = {false};
+        final Runnable prepare = () -> {
+            if (!prepared[0] && player == target) {
+                prepared[0] = true;
+                player.prepare();
+            }
+        };
+        final DisplayManager.DisplayListener listener = new DisplayManager.DisplayListener() {
+            @Override
+            public void onDisplayAdded(int displayId) {
+            }
+
+            @Override
+            public void onDisplayRemoved(int displayId) {
+            }
+
+            @Override
+            public void onDisplayChanged(int displayId) {
+                manager.unregisterDisplayListener(this);
+                // The HDMI audio link drops and returns about a second after the mode switch
+                playerView.postDelayed(prepare, 1200);
+            }
+        };
+        manager.registerDisplayListener(listener, null);
+        // If the display never reports a change, start anyway
+        playerView.postDelayed(() -> {
+            manager.unregisterDisplayListener(listener);
+            prepare.run();
+        }, 6000);
     }
 
     // Chapters named for it first; otherwise TheIntroDB, if allowed, for titles the stream identifies

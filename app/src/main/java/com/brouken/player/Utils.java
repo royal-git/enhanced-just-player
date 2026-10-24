@@ -507,76 +507,81 @@ class Utils {
     @RequiresApi(api = Build.VERSION_CODES.M)
     static void handleFrameRate(final PlayerActivity activity, float frameRate, boolean play) {
         activity.runOnUiThread(() -> {
-            boolean switchingModes = false;
-
             if (BuildConfig.DEBUG)
                 Toast.makeText(activity, "Video frameRate: " + frameRate, Toast.LENGTH_LONG).show();
 
-            if (frameRate > 0) {
-                Display display = activity.getWindow().getDecorView().getDisplay();
-                if (display == null) {
-                    return;
-                }
-                Display.Mode[] supportedModes = display.getSupportedModes();
-                Display.Mode activeMode = display.getMode();
-
-                if (supportedModes.length > 1) {
-                    // Refresh rate >= video FPS
-                    List<Display.Mode> modesHigh = new ArrayList<>();
-                    // Max refresh rate
-                    Display.Mode modeTop = activeMode;
-                    int modesResolutionCount = 0;
-
-                    // Filter only resolutions same as current
-                    for (Display.Mode mode : supportedModes) {
-                        if (mode.getPhysicalWidth() == activeMode.getPhysicalWidth() &&
-                                mode.getPhysicalHeight() == activeMode.getPhysicalHeight()) {
-                            modesResolutionCount++;
-
-                            if (normRate(mode.getRefreshRate()) >= normRate(frameRate))
-                                modesHigh.add(mode);
-
-                            if (normRate(mode.getRefreshRate()) > normRate(modeTop.getRefreshRate()))
-                                modeTop = mode;
-                        }
-                    }
-
-                    if (modesResolutionCount > 1) {
-                        Display.Mode modeBest = null;
-                        String modes = "Available refreshRates:";
-
-                        for (Display.Mode mode : modesHigh) {
-                            modes += " " + mode.getRefreshRate();
-                            if (normRate(mode.getRefreshRate()) % normRate(frameRate) <= 0.0001f) {
-                                if (modeBest == null || normRate(mode.getRefreshRate()) > normRate(modeBest.getRefreshRate())) {
-                                    modeBest = mode;
-                                }
-                            }
-                        }
-
-                        Window window = activity.getWindow();
-                        WindowManager.LayoutParams layoutParams = window.getAttributes();
-
-                        if (modeBest == null)
-                            modeBest = modeTop;
-
-                        switchingModes = !(modeBest.getModeId() == activeMode.getModeId());
-                        if (switchingModes) {
-                            layoutParams.preferredDisplayModeId = modeBest.getModeId();
-                            window.setAttributes(layoutParams);
-                        }
-                        if (BuildConfig.DEBUG)
-                            Toast.makeText(activity, modes + "\n" +
-                                    "Video frameRate: " + frameRate + "\n" +
-                                    "Current display refreshRate: " + modeBest.getRefreshRate(), Toast.LENGTH_LONG).show();
-                    }
-                }
-            }
-
-            if (!switchingModes) {
+            if (!applyFrameRateMode(activity, frameRate)) {
                 playIfCan(activity, play);
             }
         });
+    }
+
+    // Asks for the display mode that fits the frame rate; true when that means a switch (on the UI thread)
+    @RequiresApi(api = Build.VERSION_CODES.M)
+    static boolean applyFrameRateMode(final Activity activity, float frameRate) {
+        boolean switchingModes = false;
+
+        if (frameRate > 0) {
+            Display display = activity.getWindow().getDecorView().getDisplay();
+            if (display == null) {
+                return false;
+            }
+            Display.Mode[] supportedModes = display.getSupportedModes();
+            Display.Mode activeMode = display.getMode();
+
+            if (supportedModes.length > 1) {
+                // Refresh rate >= video FPS
+                List<Display.Mode> modesHigh = new ArrayList<>();
+                // Max refresh rate
+                Display.Mode modeTop = activeMode;
+                int modesResolutionCount = 0;
+
+                // Filter only resolutions same as current
+                for (Display.Mode mode : supportedModes) {
+                    if (mode.getPhysicalWidth() == activeMode.getPhysicalWidth() &&
+                            mode.getPhysicalHeight() == activeMode.getPhysicalHeight()) {
+                        modesResolutionCount++;
+
+                        if (normRate(mode.getRefreshRate()) >= normRate(frameRate))
+                            modesHigh.add(mode);
+
+                        if (normRate(mode.getRefreshRate()) > normRate(modeTop.getRefreshRate()))
+                            modeTop = mode;
+                    }
+                }
+
+                if (modesResolutionCount > 1) {
+                    Display.Mode modeBest = null;
+                    String modes = "Available refreshRates:";
+
+                    for (Display.Mode mode : modesHigh) {
+                        modes += " " + mode.getRefreshRate();
+                        if (normRate(mode.getRefreshRate()) % normRate(frameRate) <= 0.0001f) {
+                            if (modeBest == null || normRate(mode.getRefreshRate()) > normRate(modeBest.getRefreshRate())) {
+                                modeBest = mode;
+                            }
+                        }
+                    }
+
+                    Window window = activity.getWindow();
+                    WindowManager.LayoutParams layoutParams = window.getAttributes();
+
+                    if (modeBest == null)
+                        modeBest = modeTop;
+
+                    switchingModes = !(modeBest.getModeId() == activeMode.getModeId());
+                    if (switchingModes) {
+                        layoutParams.preferredDisplayModeId = modeBest.getModeId();
+                        window.setAttributes(layoutParams);
+                    }
+                    if (BuildConfig.DEBUG)
+                        Toast.makeText(activity, modes + "\n" +
+                                "Video frameRate: " + frameRate + "\n" +
+                                "Current display refreshRate: " + modeBest.getRefreshRate(), Toast.LENGTH_LONG).show();
+                }
+            }
+        }
+        return switchingModes;
     }
 
     static void playIfCan(final PlayerActivity activity, boolean play) {
@@ -819,26 +824,32 @@ class Utils {
             if (timestamps.size() > 1) {
                 float averageFrameDuration = (float) totalFrameDuration / (timestamps.size() - ignoreSamples - 1);
                 frameRate = 1_000_000f / averageFrameDuration;
-                if (frameRate > 23.95f && frameRate < 23.988f) {
-                    frameRate = 24000f / 1001f;
-                } else if (frameRate > 23.988 && frameRate < 24.1) {
-                    frameRate = 24f;
-                } else if (frameRate > 24.9 && frameRate < 25.1) {
-                    frameRate = 25f;
-                } else if (frameRate > 29.95f && frameRate < 29.985) {
-                    frameRate = 30000f / 1001f;
-                } else if (frameRate > 29.985 && frameRate < 30.1) {
-                    frameRate = 30f;
-                } else if (frameRate > 49.9f && frameRate < 50.1) {
-                    frameRate = 50f;
-                } else if (frameRate > 59.9f && frameRate < 59.97) {
-                    frameRate = 60000f / 1001f;
-                }
+                frameRate = normalizeFrameRate(frameRate);
             }
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
             mediaExtractor.release();
+        }
+        return frameRate;
+    }
+
+    // Snap a measured rate to the standard one it stands for (23.976 rather than 23.9761)
+    public static float normalizeFrameRate(float frameRate) {
+        if (frameRate > 23.95f && frameRate < 23.988f) {
+            frameRate = 24000f / 1001f;
+        } else if (frameRate > 23.988 && frameRate < 24.1) {
+            frameRate = 24f;
+        } else if (frameRate > 24.9 && frameRate < 25.1) {
+            frameRate = 25f;
+        } else if (frameRate > 29.95f && frameRate < 29.985) {
+            frameRate = 30000f / 1001f;
+        } else if (frameRate > 29.985 && frameRate < 30.1) {
+            frameRate = 30f;
+        } else if (frameRate > 49.9f && frameRate < 50.1) {
+            frameRate = 50f;
+        } else if (frameRate > 59.9f && frameRate < 59.97) {
+            frameRate = 60000f / 1001f;
         }
         return frameRate;
     }
