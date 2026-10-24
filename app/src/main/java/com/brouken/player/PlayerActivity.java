@@ -1292,8 +1292,21 @@ public class PlayerActivity extends Activity {
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
         MediaCodecUtil.setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
-        @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this)
-                .setExtensionRendererMode(mPrefs.decoderPriority);
+        BestAudioTrackSelector.clearDetectedObjectAudio();
+        @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this) {
+            @Override
+            protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput, boolean enableAudioTrackPlaybackParams) {
+                // Reads passthrough frames for Atmos, which Matroska does not declare
+                return new ObjectAudioDetectingSink(super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams), format -> {
+                    BestAudioTrackSelector.markObjectAudio(format);
+                    final Format playing = selectedFormat(C.TRACK_TYPE_AUDIO);
+                    if (playing != null && Util.areEqual(playing.sampleMimeType, format.sampleMimeType)) {
+                        BestAudioTrackSelector.markObjectAudio(playing);
+                    }
+                    refreshPanels();
+                });
+            }
+        }.setExtensionRendererMode(mPrefs.decoderPriority);
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
@@ -2309,25 +2322,34 @@ public class PlayerActivity extends Activity {
 
     private void updateBadges(@Nullable Format video, @Nullable Format audio) {
         final List<String> badges = new ArrayList<>();
+        String dynamicRange = null;
         if (video != null) {
             if (video.width >= 3200 || video.height >= 2000) {
                 badges.add("4K");
             } else if (video.width >= 1800 || video.height >= 1000) {
                 badges.add("HD");
             }
-            final String dynamicRange = describeVideo(video).split(" · ")[0];
-            if (dynamicRange.startsWith("Dolby Vision")) {
-                badges.add("DOLBY VISION");
-            } else if (!"SDR".equals(dynamicRange)) {
-                badges.add(dynamicRange);
-            }
+            dynamicRange = describeVideo(video).split(" · ")[0];
         }
+        String audioBadge = null;
         if (audio != null) {
             if (BestAudioTrackSelector.isObjectAudio(audio)) {
-                badges.add(BestAudioTrackSelector.describeCodec(audio).contains("DTS:X") ? "DTS:X" : "DOLBY ATMOS");
+                audioBadge = BestAudioTrackSelector.describeCodec(audio).contains("DTS:X") ? "DTS:X" : "DOLBY ATMOS";
             } else if (audio.channelCount >= 6) {
-                badges.add(audio.channelCount >= 8 ? "7.1" : "5.1");
+                audioBadge = audio.channelCount >= 8 ? "7.1" : "5.1";
             }
+        }
+        // Dolby Vision with Atmos reads as one label, the way Dolby presents the pair
+        if (dynamicRange != null && dynamicRange.startsWith("Dolby Vision") && "DOLBY ATMOS".equals(audioBadge)) {
+            badges.add("DOLBY VISION · ATMOS");
+            audioBadge = null;
+        } else if (dynamicRange != null && dynamicRange.startsWith("Dolby Vision")) {
+            badges.add("DOLBY VISION");
+        } else if (dynamicRange != null && !"SDR".equals(dynamicRange)) {
+            badges.add(dynamicRange);
+        }
+        if (audioBadge != null) {
+            badges.add(audioBadge);
         }
 
         badgeRow.removeAllViews();

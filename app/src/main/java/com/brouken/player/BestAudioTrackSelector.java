@@ -17,6 +17,8 @@ import androidx.media3.exoplayer.trackselection.ExoTrackSelection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 // Picks the best audio track instead of the one flagged default: object audio (Atmos, DTS:X) first,
@@ -194,9 +196,25 @@ public class BestAudioTrackSelector extends DefaultTrackSelector {
         return false;
     }
 
+    // Tracks found to carry Atmos in their frames (see ObjectAudioDetectingSink); cleared for each new file
+    private static final Set<String> detectedObjectAudio = ConcurrentHashMap.newKeySet();
+
+    private static String trackKey(Format format) {
+        return format.id + "|" + format.sampleMimeType + "|" + format.language + "|" + format.channelCount;
+    }
+
+    public static void markObjectAudio(Format format) {
+        detectedObjectAudio.add(trackKey(format));
+    }
+
+    public static void clearDetectedObjectAudio() {
+        detectedObjectAudio.clear();
+    }
+
     public static boolean isObjectAudio(Format format) {
         final String label = format.label == null ? "" : format.label.toLowerCase(Locale.ROOT);
-        return MimeTypes.AUDIO_E_AC3_JOC.equals(format.sampleMimeType) || label.contains("atmos") || label.contains("dts:x") || label.contains("dts-x");
+        return MimeTypes.AUDIO_E_AC3_JOC.equals(format.sampleMimeType) || label.contains("atmos") || label.contains("dts:x") || label.contains("dts-x")
+                || detectedObjectAudio.contains(trackKey(format));
     }
 
     private static int codecRank(Format format) {
