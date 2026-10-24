@@ -165,7 +165,7 @@ public class PlayerActivity extends Activity {
     public static final int CONTROLLER_TIMEOUT = 5000;
     // A new video gets longer: on a TV, switching to HDR or the film's frame rate blanks the screen for a couple of
     // seconds just as playback starts, and the controls should still be there once the picture is
-    private static final int CONTROLLER_TIMEOUT_START = 10_000;
+    private static final int CONTROLLER_TIMEOUT_START = 7_000;
     private boolean startTimeoutPending;
     // Until this uptime the controls stay up during playback, whatever else asks for the usual timeout
     private static long startHoldUntilMs;
@@ -191,6 +191,9 @@ public class PlayerActivity extends Activity {
     private LinearLayout popoverInfo;
     private LinearLayout popoverAbout;
     @Nullable private MediaIdentity mediaIdentity;
+    private TrackMemory trackMemory;
+    @Nullable private String memoryShowId;
+    private boolean trackMemoryApplied;
     @Nullable private Cinemeta.Meta mediaMeta;
     @Nullable private Bitmap mediaPoster;
     private static final ExecutorService background = Executors.newSingleThreadExecutor();
@@ -516,6 +519,7 @@ public class PlayerActivity extends Activity {
         iconMore = playerView.findViewById(R.id.icon_more);
         popoverInfo = playerView.findViewById(R.id.popover_info);
         popoverAbout = playerView.findViewById(R.id.popover_about);
+        trackMemory = new TrackMemory(this);
         final View aboutPoster = popoverAbout.findViewById(R.id.about_poster);
         aboutPoster.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -1324,6 +1328,16 @@ public class PlayerActivity extends Activity {
                         .setPreferredAudioLanguages(mPrefs.languageAudio)
                 );
         }
+        // A language chosen for this show before wins over the defaults, before the first selection is made,
+        // so playback starts in it rather than switching once tracks are known
+        final MediaIdentity launchIdentity = MediaIdentity.fromUri(mPrefs.mediaUri);
+        memoryShowId = launchIdentity != null ? launchIdentity.imdbId : null;
+        trackMemoryApplied = false;
+        final TrackMemory.Choice rememberedAudio = trackMemory.audioFor(memoryShowId);
+        if (rememberedAudio != null && rememberedAudio.language != null) {
+            trackSelector.setParameters(trackSelector.buildUponParameters()
+                    .setPreferredAudioLanguages(rememberedAudio.language));
+        }
         final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
         if (!captioningManager.isEnabled()) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
@@ -1622,6 +1636,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onTracksChanged(Tracks tracks) {
+            applyTrackMemory(tracks);
             refreshPanels();
         }
 
@@ -2108,6 +2123,40 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    // Subtitles as last chosen: for this show if it has a choice, else the last choice anywhere. Applied once,
+    // when the first tracks are known. Only for streams another app hands over: for local files Just Player
+    // remembers tracks per file itself.
+    private void applyTrackMemory(Tracks tracks) {
+        if (trackMemoryApplied || tracks.isEmpty() || player == null || !(apiAccess || memoryShowId != null)) {
+            return;
+        }
+        trackMemoryApplied = true;
+        final TrackMemory.Choice showChoice = trackMemory.textForShow(memoryShowId);
+        final TrackMemory.Choice choice = showChoice != null ? showChoice : trackMemory.globalText();
+        if (choice == null) {
+            return;
+        }
+        if (choice.off) {
+            // Off for this show means off; a global "off" keeps the defaults, which still show forced subtitles
+            if (showChoice != null) {
+                player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build());
+            }
+            return;
+        }
+        final int[] match = TrackMemory.findText(tracks, choice);
+        if (match == null) {
+            return;
+        }
+        final Tracks.Group group = tracks.getGroups().get(match[0]);
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(new TrackSelectionOverride(group.getMediaTrackGroup(), match[1]))
+                .build());
+    }
+
     // Autoplay used to hide the controls the moment playback started; on a TV that is exactly when the screen blanks
     // for the switch to HDR or the film's frame rate. Show them for the start timeout instead, so the title and the
     // format are readable once the picture appears.
@@ -2314,11 +2363,13 @@ public class PlayerActivity extends Activity {
         final int trackType = anchor == iconAudio ? C.TRACK_TYPE_AUDIO : C.TRACK_TYPE_TEXT;
         final Tracks tracks = player.getCurrentTracks();
         if (trackType == C.TRACK_TYPE_TEXT) {
-            items.add(new MenuItem("Off", null, !tracks.isTypeSelected(C.TRACK_TYPE_TEXT), false,
-                    () -> player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                            .build())));
+            items.add(new MenuItem("Off", null, !tracks.isTypeSelected(C.TRACK_TYPE_TEXT), false, () -> {
+                player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build());
+                trackMemory.rememberText(memoryShowId, TrackMemory.Choice.off());
+            }));
         }
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() != trackType) {
@@ -2353,10 +2404,17 @@ public class PlayerActivity extends Activity {
                 items.add(new MenuItem(BestAudioTrackSelector.languageName(format),
                         details.isEmpty() ? null : TextUtils.join(" · ", details),
                         group.isTrackSelected(i), trackType == C.TRACK_TYPE_AUDIO && BestAudioTrackSelector.isBestOfSeveral(tracks, format),
-                        supported ? () -> player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                                .setTrackTypeDisabled(trackType, false)
-                                .setOverrideForType(new TrackSelectionOverride(trackGroup, index))
-                                .build()) : null));
+                        supported ? () -> {
+                            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                                    .setTrackTypeDisabled(trackType, false)
+                                    .setOverrideForType(new TrackSelectionOverride(trackGroup, index))
+                                    .build());
+                            if (trackType == C.TRACK_TYPE_AUDIO) {
+                                trackMemory.rememberAudio(memoryShowId, format);
+                            } else {
+                                trackMemory.rememberText(memoryShowId, TrackMemory.Choice.of(format));
+                            }
+                        } : null));
             }
         }
         if (items.isEmpty()) {
